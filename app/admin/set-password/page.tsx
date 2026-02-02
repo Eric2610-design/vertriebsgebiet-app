@@ -6,7 +6,7 @@ export default function SetPasswordPage() {
   const [token, setToken] = useState("");
   const [userId, setUserId] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [out, setOut] = useState<string>("");
+  const [out, setOut] = useState("");
 
   async function run() {
     setOut("Sende Anfrage...");
@@ -16,27 +16,29 @@ export default function SetPasswordPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, userId, newPassword }),
       });
-      const j = await res.json();
+
+      const j = await res.json().catch(() => ({}));
       if (!res.ok) {
         setOut(`Fehler (${res.status}): ${j?.error ?? "unknown error"}`);
         return;
       }
-      setOut(`OK ✅ Passwort gesetzt für: ${j.user?.email ?? "(unknown)"}`);
+
+      setOut(`OK ✅ Passwort gesetzt für: ${j?.user?.email ?? "(unknown)"}`);
     } catch (e: any) {
       setOut(`Fehler: ${e?.message ?? "unknown"}`);
     }
   }
 
   return (
-    <div className="card" style={{ maxWidth: 720 }}>
+    <div className="card" style={{ maxWidth: 760 }}>
       <h2 style={{ marginTop: 0 }}>Admin: Passwort setzen</h2>
-      <p>
+      <p style={{ marginTop: 0 }}>
         <small>
-          Nutze das nur einmal, solange E-Mail Rate-Limit aktiv ist. Danach Seite wieder löschen oder Token ändern.
+          Nur nutzen, solange E-Mail Rate-Limit aktiv ist. Danach Seite löschen oder Token ändern.
         </small>
       </p>
 
-      <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ display: "grid", gap: 12 }}>
         <div>
           <label>ADMIN_SETUP_TOKEN</label>
           <input
