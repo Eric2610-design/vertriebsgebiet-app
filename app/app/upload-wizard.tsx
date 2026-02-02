@@ -168,8 +168,19 @@ export default function UploadWizard({ workspaces, sourceTypes }: { workspaces: 
   async function loadCandidates() {
     setCandidatesBusy(true);
     try {
-      const { data, error } = await supabase
-        .from("match_candidates")
+const db = supabase!.schema("app");
+const { data, error } = await db
+  .from("match_candidates")
+  .select(`
+    id, score, reason, status, created_at,
+    left:source_records!match_candidates_left_source_record_id_fkey(id,name,street,zipcode,city),
+    right:source_records!match_candidates_right_source_record_id_fkey(id,name,street,zipcode,city)
+  `)
+  .eq("workspace_id", workspaceId)
+  .eq("status", "suggested")
+  .order("score", { ascending: false })
+  .limit(100);
+
         .select(`
           id, score, reason, status, created_at,
           left:source_records!match_candidates_left_source_record_id_fkey(id,name,street,zipcode,city),
