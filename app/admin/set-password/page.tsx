@@ -53,4 +53,35 @@ export default function SetPasswordPage() {
             className="input"
             value={userId}
             onChange={(e) => setUserId(e.target.value)}
-            placeholder="xxxxxxxx-x
+            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+          />
+        </div>
+
+        <div>
+          <label>Neues Passwort (min. 10 Zeichen)</label>
+          <input
+            className="input"
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="z.B. EinSehrSicheresPasswort123!"
+          />
+        </div>
+
+        <button
+          className="btn"
+          onClick={run}
+          disabled={!token || !userId || newPassword.length < 10}
+        >
+          Passwort setzen
+        </button>
+
+        {out && (
+          <div style={{ marginTop: 6 }}>
+            <small>{out}</small>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
