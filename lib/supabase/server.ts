@@ -8,6 +8,7 @@ export function createSupabaseServer() {
     mustGetEnv("NEXT_PUBLIC_SUPABASE_URL"),
     mustGetEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
     {
+      db: { schema: "app" },
       cookies: {
         get(name) { return cookieStore.get(name)?.value; },
         set(name, value, options) { cookieStore.set({ name, value, ...options }); },
