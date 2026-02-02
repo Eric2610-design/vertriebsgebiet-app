@@ -5,6 +5,9 @@ export function createSupabaseAdmin() {
   return createClient(
     mustGetEnv("NEXT_PUBLIC_SUPABASE_URL"),
     mustGetEnv("SUPABASE_SERVICE_ROLE_KEY"),
-    { auth: { persistSession: false } }
+    {
+      auth: { persistSession: false },
+      db: { schema: "app" },
+    }
   );
 }
