@@ -5,6 +5,17 @@ import { createSupabaseBrowser } from "../../lib/supabase/browser";
 
 export default function LoginPage() {
   const supabase = useMemo(() => createSupabaseBrowser(), []);
+if (!supabase) {
+  return (
+    <div className="card">
+      <h2 style={{marginTop:0}}>Konfiguration fehlt</h2>
+      <p><small>
+        In Vercel fehlen NEXT_PUBLIC_SUPABASE_URL oder NEXT_PUBLIC_SUPABASE_ANON_KEY (oft nur im Preview-Environment).
+      </small></p>
+    </div>
+  );
+}
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"password" | "magic">("password");
