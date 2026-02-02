@@ -6,15 +6,18 @@ export default async function AppPage() {
   const supabase = createSupabaseServer();
   const { data: userData } = await supabase.auth.getUser();
 
-  const { data: workspaces, error: wsErr } = await supabase
-    .from("workspace_members")
-    .select("workspace_id, role, workspaces(name)")
-    .order("created_at", { ascending: true });
+const db = supabase.schema("app");
 
-  const { data: sourceTypes } = await supabase
-    .from("source_types")
-    .select("id, code, display_name")
-    .order("display_name", { ascending: true });
+const { data: workspaces, error: wsErr } = await db
+  .from("workspace_members")
+  .select("workspace_id, role, workspaces(name)")
+  .order("created_at", { ascending: true });
+
+const { data: sourceTypes } = await db
+  .from("source_types")
+  .select("id, code, display_name")
+  .order("display_name", { ascending: true });
+
 
   return (
     <div className="card">
