@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseBrowser } from "../../lib/supabase/browser";
 
 type Workspace = { id: string; name: string };
@@ -26,8 +27,18 @@ type Mapping = {
   external?: Record<string, string>;
 };
 
-export default function UploadWizard({ workspaces, sourceTypes }: { workspaces: Workspace[]; sourceTypes: SourceType[] }) {
-  const supabase = useMemo(() => createSupabaseBrowser(), []);
+export default function UploadWizard({
+  workspaces,
+  sourceTypes,
+}: {
+  workspaces: Workspace[];
+  sourceTypes: SourceType[];
+}) {
+  const supabase = useMemo<SupabaseClient | null>(
+    () => (createSupabaseBrowser() as unknown as SupabaseClient | null),
+    []
+  );
+
   const [workspaceId, setWorkspaceId] = useState(workspaces[0]?.id ?? "");
   const [sourceTypeCode, setSourceTypeCode] = useState(sourceTypes[0]?.code ?? "");
   const [file, setFile] = useState<File | null>(null);
@@ -57,9 +68,9 @@ export default function UploadWizard({ workspaces, sourceTypes }: { workspaces: 
   }, [analyze, sourceTypeCode]);
 
   function autoSuggestMapping(sourceType: string, hdrs: string[]): Mapping {
-    const h = hdrs.map(x => x.trim());
-    const find = (...cands: string[]) => h.find(x => cands.some(c => x.toLowerCase() === c.toLowerCase()));
-    const includes = (cand: RegExp) => h.find(x => cand.test(x.toLowerCase()));
+    const h = hdrs.map((x) => x.trim());
+    const find = (...cands: string[]) => h.find((x) => cands.some((c) => x.toLowerCase() === c.toLowerCase()));
+    const includes = (cand: RegExp) => h.find((x) => cand.test(x.toLowerCase()));
 
     const m: Mapping = { external: {} };
 
@@ -71,6 +82,7 @@ export default function UploadWizard({ workspaces, sourceTypes }: { workspaces: 
       m.phone = find("Telefon") ?? includes(/tel/);
       m.email = find("E-Mail") ?? find("Email") ?? includes(/mail/);
       m.website = find("Homepage") ?? includes(/home|web/);
+
       const kdnr = find("KdNr") ?? find("Kdnr");
       if (kdnr) m.external!["zeg_kdnr"] = kdnr;
       const adr = find("AdrNr") ?? find("Adrnr");
@@ -84,6 +96,7 @@ export default function UploadWizard({ workspaces, sourceTypes }: { workspaces: 
       m.city = find("Ort") ?? includes(/ort|city/);
       m.phone = find("Telefonnr.") ?? includes(/tel/);
       m.website = find("Homepage") ?? includes(/web|home/);
+
       const dzb = find("DZB Händlernr.") ?? includes(/händlernr|haendlernr/);
       if (dzb) m.external!["bico_dzb"] = dzb;
       const ust = find("USt Id Nr") ?? includes(/ust/);
@@ -110,6 +123,7 @@ export default function UploadWizard({ workspaces, sourceTypes }: { workspaces: 
       m.city = includes(/ort|city/) ?? undefined;
       m.street = includes(/str|street|adress/) ?? undefined;
     }
+
     if (m.external && Object.keys(m.external).length === 0) delete m.external;
     return m;
   }
@@ -119,6 +133,7 @@ export default function UploadWizard({ workspaces, sourceTypes }: { workspaces: 
     setBusy(true);
     setMsg(null);
     setAnalyze(null);
+
     try {
       const fd = new FormData();
       fd.append("file", file);
@@ -141,6 +156,7 @@ export default function UploadWizard({ workspaces, sourceTypes }: { workspaces: 
     setBusy(true);
     setMsg(null);
     setImportResult(null);
+
     try {
       const res = await fetch("/api/import/commit", {
         method: "POST",
@@ -166,26 +182,26 @@ export default function UploadWizard({ workspaces, sourceTypes }: { workspaces: 
   }
 
   async function loadCandidates() {
-    setCandidatesBusy(true);
-    try {
-const db = supabase!.schema("app");
-const { data, error } = await db
-  .from("match_candidates")
-  .select(`
-    id, score, reason, status, created_at,
-    left:source_records!match_candidates_left_source_record_id_fkey(id,name,street,zipcode,city),
-    right:source_records!match_candidates_right_source_record_id_fkey(id,name,street,zipcode,city)
-  `)
-  .eq("workspace_id", workspaceId)
-  .eq("status", "suggested")
-  .order("score", { ascending: false })
-  .limit(100);
+    if (!supabase) {
+      setMsg("Supabase-Konfiguration fehlt (NEXT_PUBLIC_SUPABASE_URL/ANON_KEY).");
+      return;
+    }
 
-        .select(`
+    setCandidatesBusy(true);
+    setMsg(null);
+
+    try {
+      const db = supabase.schema("app");
+
+      const { data, error } = await db
+        .from("match_candidates")
+        .select(
+          `
           id, score, reason, status, created_at,
           left:source_records!match_candidates_left_source_record_id_fkey(id,name,street,zipcode,city),
           right:source_records!match_candidates_right_source_record_id_fkey(id,name,street,zipcode,city)
-        `)
+        `
+        )
         .eq("workspace_id", workspaceId)
         .eq("status", "suggested")
         .order("score", { ascending: false })
@@ -193,7 +209,7 @@ const { data, error } = await db
 
       if (error) throw error;
       setCandidates(data ?? []);
-    } catch (e:any) {
+    } catch (e: any) {
       setMsg(e?.message ?? "Konnte Vorschläge nicht laden.");
     } finally {
       setCandidatesBusy(false);
@@ -205,7 +221,7 @@ const { data, error } = await db
     const res = await fetch("/api/match/accept", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ candidateId: id })
+      body: JSON.stringify({ candidateId: id }),
     });
     const j = await res.json();
     if (!res.ok) setMsg(j?.error ?? "Accept fehlgeschlagen");
@@ -217,7 +233,7 @@ const { data, error } = await db
     const res = await fetch("/api/match/reject", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ candidateId: id })
+      body: JSON.stringify({ candidateId: id }),
     });
     const j = await res.json();
     if (!res.ok) setMsg(j?.error ?? "Reject fehlgeschlagen");
@@ -234,96 +250,158 @@ const { data, error } = await db
     { key: "website", label: "Website" },
   ];
 
+  // Wenn Supabase im Browser nicht konfiguriert ist, lieber sauber anzeigen statt White-Screen.
+  if (!supabase) {
+    return (
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Konfiguration fehlt</h3>
+        <p style={{ marginBottom: 0 }}>
+          <small>
+            In Vercel fehlen <b>NEXT_PUBLIC_SUPABASE_URL</b> oder <b>NEXT_PUBLIC_SUPABASE_ANON_KEY</b> (häufig nur im Preview-Environment).
+          </small>
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div>
-      <div className="card" style={{marginBottom:12}}>
-        <h3 style={{marginTop:0}}>1) Datei auswählen & analysieren</h3>
+      <div className="card" style={{ marginBottom: 12 }}>
+        <h3 style={{ marginTop: 0 }}>1) Datei auswählen & analysieren</h3>
 
         <div className="row">
-          <div style={{flex:"1 1 240px"}}>
+          <div style={{ flex: "1 1 240px" }}>
             <label>Workspace</label>
-            <select className="input" value={workspaceId} onChange={(e)=>setWorkspaceId(e.target.value)}>
-              {workspaces.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            <select className="input" value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)}>
+              {workspaces.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
             </select>
           </div>
-          <div style={{flex:"1 1 240px"}}>
+
+          <div style={{ flex: "1 1 240px" }}>
             <label>Quelle</label>
-            <select className="input" value={sourceTypeCode} onChange={(e)=>setSourceTypeCode(e.target.value)}>
-              {sourceTypes.map(s => <option key={s.code} value={s.code}>{s.name}</option>)}
+            <select className="input" value={sourceTypeCode} onChange={(e) => setSourceTypeCode(e.target.value)}>
+              {sourceTypes.map((s) => (
+                <option key={s.code} value={s.code}>
+                  {s.name}
+                </option>
+              ))}
             </select>
           </div>
-          <div style={{flex:"2 1 320px"}}>
+
+          <div style={{ flex: "2 1 320px" }}>
             <label>Excel-Datei</label>
-            <input className="input" type="file" accept=".xlsx,.xls" onChange={(e)=>setFile(e.target.files?.[0] ?? null)} />
+            <input
+              className="input"
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
           </div>
         </div>
 
-        <div style={{display:"flex", gap:10, marginTop:12, flexWrap:"wrap"}}>
+        <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
           <button className="btn" onClick={analyzeFile} disabled={busy || !file || !workspaceId || !sourceTypeCode}>
             {busy ? "Analysiere…" : "Datei analysieren"}
           </button>
-          <button className="btn secondary" onClick={()=>{ setAnalyze(null); setImportResult(null); setCandidates([]); setMsg(null); }} disabled={busy}>
+          <button
+            className="btn secondary"
+            onClick={() => {
+              setAnalyze(null);
+              setImportResult(null);
+              setCandidates([]);
+              setMsg(null);
+            }}
+            disabled={busy}
+          >
             Reset
           </button>
         </div>
 
-        {msg && <p style={{marginTop:12, marginBottom:0}}><small style={{color:"crimson"}}>{msg}</small></p>}
+        {msg && (
+          <p style={{ marginTop: 12, marginBottom: 0 }}>
+            <small style={{ color: "crimson" }}>{msg}</small>
+          </p>
+        )}
       </div>
 
       {analyze && (
-        <div className="card" style={{marginBottom:12}}>
-          <h3 style={{marginTop:0}}>2) Mapping festlegen</h3>
-          <small>Datei: {analyze.fileName} · ImportRun: {analyze.importRunId}</small>
+        <div className="card" style={{ marginBottom: 12 }}>
+          <h3 style={{ marginTop: 0 }}>2) Mapping festlegen</h3>
+          <small>
+            Datei: {analyze.fileName} · ImportRun: {analyze.importRunId}
+          </small>
 
-          <div className="row" style={{marginTop:12}}>
-            <div style={{flex:"1 1 240px"}}>
+          <div className="row" style={{ marginTop: 12 }}>
+            <div style={{ flex: "1 1 240px" }}>
               <label>Sheet</label>
-              <select className="input" value={sheetName} onChange={(e)=>setSheetName(e.target.value)}>
-                {analyze.sheetNames.map(s => <option key={s} value={s}>{s}</option>)}
+              <select className="input" value={sheetName} onChange={(e) => setSheetName(e.target.value)}>
+                {analyze.sheetNames.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
               </select>
             </div>
-            <div style={{flex:"1 1 240px"}}>
+
+            <div style={{ flex: "1 1 240px" }}>
               <label>Header-Zeile (meist 1)</label>
-              <input className="input" type="number" value={headerRow} min={1} onChange={(e)=>setHeaderRow(parseInt(e.target.value || "1", 10))} />
+              <input
+                className="input"
+                type="number"
+                value={headerRow}
+                min={1}
+                onChange={(e) => setHeaderRow(parseInt(e.target.value || "1", 10))}
+              />
             </div>
           </div>
 
-          <div style={{marginTop:12}}>
+          <div style={{ marginTop: 12 }}>
             <div className="row">
-              {canonicalFields.map(f => (
-                <div key={String(f.key)} style={{flex:"1 1 240px"}}>
+              {canonicalFields.map((f) => (
+                <div key={String(f.key)} style={{ flex: "1 1 240px" }}>
                   <label>{f.label}</label>
                   <select
                     className="input"
                     value={(mapping as any)[f.key] ?? ""}
-                    onChange={(e)=>setMapping(prev => ({...prev, [f.key]: e.target.value || undefined}))}
+                    onChange={(e) => setMapping((prev) => ({ ...prev, [f.key]: e.target.value || undefined }))}
                   >
                     <option value="">(nicht nutzen)</option>
-                    {headers.map(h => <option key={h} value={h}>{h}</option>)}
+                    {headers.map((h) => (
+                      <option key={h} value={h}>
+                        {h}
+                      </option>
+                    ))}
                   </select>
                 </div>
               ))}
             </div>
 
-            <div style={{marginTop:12}}>
+            <div style={{ marginTop: 12 }}>
               <label>Externe IDs (optional)</label>
               <div className="row">
-                {["zeg_kdnr","zeg_adrnr","zeg_mglnr","bico_dzb","ustid"].map((k)=>(
-                  <div key={k} style={{flex:"1 1 240px"}}>
+                {["zeg_kdnr", "zeg_adrnr", "zeg_mglnr", "bico_dzb", "ustid"].map((k) => (
+                  <div key={k} style={{ flex: "1 1 240px" }}>
                     <label>{k}</label>
                     <select
                       className="input"
-                      value={(mapping.external?.[k] ?? "")}
-                      onChange={(e)=>setMapping(prev => ({
-                        ...prev,
-                        external: {
-                          ...(prev.external ?? {}),
-                          [k]: e.target.value || ""
-                        }
-                      }))}
+                      value={mapping.external?.[k] ?? ""}
+                      onChange={(e) =>
+                        setMapping((prev) => ({
+                          ...prev,
+                          external: { ...(prev.external ?? {}), [k]: e.target.value || "" },
+                        }))
+                      }
                     >
                       <option value="">(nicht nutzen)</option>
-                      {headers.map(h => <option key={h} value={h}>{h}</option>)}
+                      {headers.map((h) => (
+                        <option key={h} value={h}>
+                          {h}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 ))}
@@ -331,7 +409,7 @@ const { data, error } = await db
               <small>Leere Auswahl wird ignoriert.</small>
             </div>
 
-            <div style={{display:"flex", gap:10, marginTop:14, flexWrap:"wrap"}}>
+            <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
               <button className="btn" onClick={commitImport} disabled={busy}>
                 {busy ? "Importiere…" : "Import starten"}
               </button>
@@ -341,7 +419,7 @@ const { data, error } = await db
             </div>
 
             {importResult && (
-              <p style={{marginTop:12, marginBottom:0}}>
+              <p style={{ marginTop: 12, marginBottom: 0 }}>
                 <span className="badge green">Importiert: {importResult.imported}</span>{" "}
                 <span className="badge yellow">Vorschläge: {importResult.candidates}</span>
               </p>
@@ -351,14 +429,14 @@ const { data, error } = await db
       )}
 
       <div className="card">
-        <h3 style={{marginTop:0}}>3) Vorschläge: Händler zusammenführen</h3>
+        <h3 style={{ marginTop: 0 }}>3) Vorschläge: Händler zusammenführen</h3>
         <small>Top 100 „suggested“ Matches für den Workspace.</small>
 
-        <div style={{marginTop:12}}>
+        <div style={{ marginTop: 12 }}>
           {candidates.length === 0 ? (
             <small>Keine Vorschläge geladen (oder keine vorhanden).</small>
           ) : (
-            <div style={{overflowX:"auto"}}>
+            <div style={{ overflowX: "auto" }}>
               <table>
                 <thead>
                   <tr>
@@ -371,19 +449,32 @@ const { data, error } = await db
                 <tbody>
                   {candidates.map((c) => (
                     <tr key={c.id}>
-                      <td><span className="badge">{Number(c.score).toFixed(2)}</span><div><small>{c.reason}</small></div></td>
                       <td>
-                        <div style={{fontWeight:700}}>{c.left?.name}</div>
-                        <small>{c.left?.street} · {c.left?.zipcode} {c.left?.city}</small>
+                        <span className="badge">{Number(c.score).toFixed(2)}</span>
+                        <div>
+                          <small>{c.reason}</small>
+                        </div>
                       </td>
                       <td>
-                        <div style={{fontWeight:700}}>{c.right?.name}</div>
-                        <small>{c.right?.street} · {c.right?.zipcode} {c.right?.city}</small>
+                        <div style={{ fontWeight: 700 }}>{c.left?.name}</div>
+                        <small>
+                          {c.left?.street} · {c.left?.zipcode} {c.left?.city}
+                        </small>
                       </td>
-                      <td style={{minWidth:180}}>
-                        <div style={{display:"flex", gap:8, flexWrap:"wrap"}}>
-                          <button className="btn" onClick={()=>acceptCandidate(c.id)}>Verknüpfen</button>
-                          <button className="btn secondary" onClick={()=>rejectCandidate(c.id)}>Ablehnen</button>
+                      <td>
+                        <div style={{ fontWeight: 700 }}>{c.right?.name}</div>
+                        <small>
+                          {c.right?.street} · {c.right?.zipcode} {c.right?.city}
+                        </small>
+                      </td>
+                      <td style={{ minWidth: 180 }}>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button className="btn" onClick={() => acceptCandidate(c.id)}>
+                            Verknüpfen
+                          </button>
+                          <button className="btn secondary" onClick={() => rejectCandidate(c.id)}>
+                            Ablehnen
+                          </button>
                         </div>
                       </td>
                     </tr>
