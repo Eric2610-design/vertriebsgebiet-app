@@ -17,10 +17,10 @@ type MapRow = {
   sources: string[];
 };
 
-function dotIcon(className: string) {
+function dotIcon() {
   return L.divIcon({
     className: "",
-    html: `<div class="${className}"></div>`,
+    html: `<div class="marker-dot"></div>`,
     iconSize: [12, 12],
     iconAnchor: [6, 6],
   });
@@ -48,7 +48,7 @@ function FitToPoints({ points }: { points: { lat: number; lng: number }[] }) {
 function ClusterLayer({ locations }: { locations: MapRow[] }) {
   const map = useMap();
   const [zoom, setZoom] = useState<number>(6);
-  const [bbox, setBbox] = useState<[number, number, number, number]>([5, 47, 16, 55]);
+  const [bbox, setBbox] = useState<[number, number, number, number]>([5, 47, 16, 55]); // grob DE
 
   useMapEvents({
     moveend() {
@@ -112,9 +112,9 @@ function ClusterLayer({ locations }: { locations: MapRow[] }) {
 
         const p = c.properties;
         return (
-          <Marker key={p.location_id} position={[lat, lng]} icon={dotIcon("marker-dot")}>
+          <Marker key={p.location_id} position={[lat, lng]} icon={dotIcon()}>
             <Popup>
-              <div style={{ minWidth: 220 }}>
+              <div style={{ minWidth: 240 }}>
                 <div style={{ fontWeight: 800 }}>{p.dealer_name}</div>
                 <small>{[p.street, `${p.zipcode ?? ""} ${p.city ?? ""}`].filter(Boolean).join(", ")}</small>
                 <div style={{ marginTop: 8 }}>
@@ -131,7 +131,7 @@ function ClusterLayer({ locations }: { locations: MapRow[] }) {
 
 export default function LeafletMap({ locations }: { locations: MapRow[] }) {
   const points = useMemo(() => locations.map((l) => ({ lat: l.lat, lng: l.lng })), [locations]);
-  const center: [number, number] = [51.1657, 10.4515]; // Mitte DE
+  const center: [number, number] = [51.1657, 10.4515];
 
   return (
     <MapContainer center={center} zoom={6} style={{ height: "100%", width: "100%" }}>
