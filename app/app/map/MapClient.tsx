@@ -5,9 +5,6 @@ import dynamic from "next/dynamic";
 
 const LeafletMap = dynamic(() => import("./LeafletMap"), { ssr: false });
 
-type Workspace = { id: string; name: string };
-type SourceType = { code: string; name: string };
-
 type MapRow = {
   location_id: string;
   dealer_id: string;
@@ -25,27 +22,43 @@ type MapRow = {
   in_territory: boolean;
 };
 
-export default function MapClient(props: { workspaces: Workspace[]; sourceTypes: SourceType[] }) {
-  const { workspaces, sourceTypes } = props;
+function defaultSourcePick(all: { code: string; name: string }[]) {
+  // wenn deine source_types.code z.B. "bico", "zeg", "rm" o.ä. sind
+  const wanted = all
+    .filter((s) => /bico|zeg|riese|müller|mueller|\brm\b/i.test(`${s.code} ${s.name}`))
+    .map((s) => s.code);
+  return wanted.length ? wanted : all.map((s) => s.code);
+}
 
-  const [workspaceId, setWorkspaceId] = useState<string>(workspaces[0]?.id ?? "");
-  const defaultSources = useMemo(() => {
-    const picks = sourceTypes
-      .filter((s) => /bico|zeg|riese|müller|mueller|\brm\b/i.test(`${s.code} ${s.name}`))
-      .map((s) => s.code);
-
-    return picks.length ? picks : sourceTypes.map((s) => s.code);
-  }, [sourceTypes]);
-
-  const [selectedSources, setSelectedSources] = useState<string[]>(defaultSources);
-  const [territoryOnly, setTerritoryOnly] = useState<boolean>(true);
+export default function MapClient() {
+  const [workspaceId, setWorkspaceId] = useState<string>("");
+  const [workspaces, setWorkspaces] = useState<{ id: string; name: string }[]>([]);
+  const [sourceTypes, setSourceTypes] = useState<{ code: string; name: string }[]>([]);
+  const [selectedSources, setSelectedSources] = useState<string[]>([]);
+  const [territoryOnly, setTerritoryOnly] = useState(true);
 
   const [rows, setRows] = useState<MapRow[]>([]);
   const [stats, setStats] = useState<{ total: number; shown: number; missingGeo: number }>({ total: 0, shown: 0, missingGeo: 0 });
-
   const [loading, setLoading] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
-  const [error, setError] = useState<string>("");
+  const [error, setError] = useState("");
+
+  // Meta laden (Workspaces + SourceTypes)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/meta");
+        const j = await res.json();
+        if (!res.ok) throw new Error(j?.error ?? "Meta konnte nicht geladen werden.");
+        setWorkspaces(j.workspaces ?? []);
+        setSourceTypes(j.sourceTypes ?? []);
+        setWorkspaceId((j.workspaces?.[0]?.id as string) ?? "");
+        setSelectedSources(defaultSourcePick(j.sourceTypes ?? []));
+      } catch (e: any) {
+        setError(e?.message ?? "Meta-Fehler");
+      }
+    })();
+  }, []);
 
   async function load() {
     if (!workspaceId) return;
@@ -60,11 +73,11 @@ export default function MapClient(props: { workspaces: Workspace[]; sourceTypes:
       });
 
       const res = await fetch(`/api/map/locations?${qs.toString()}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? "Konnte Locations nicht laden.");
+      const j = await res.json();
+      if (!res.ok) throw new Error(j?.error ?? "Locations konnten nicht geladen werden.");
 
-      setRows(json.locations ?? []);
-      setStats(json.stats ?? { total: 0, shown: 0, missingGeo: 0 });
+      setRows(j.locations ?? []);
+      setStats(j.stats ?? { total: 0, shown: 0, missingGeo: 0 });
     } catch (e: any) {
       setError(e?.message ?? "Fehler beim Laden");
       setRows([]);
@@ -85,9 +98,8 @@ export default function MapClient(props: { workspaces: Workspace[]; sourceTypes:
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workspaceId, limit: 15, territoryOnly }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? "Geocoding fehlgeschlagen.");
-
+      const j = await res.json();
+      if (!res.ok) throw new Error(j?.error ?? "Geocoding fehlgeschlagen.");
       await load();
     } catch (e: any) {
       setError(e?.message ?? "Geocoding-Fehler");
@@ -96,28 +108,23 @@ export default function MapClient(props: { workspaces: Workspace[]; sourceTypes:
     }
   }
 
-  // Beim Wechsel des Workspaces automatisch laden
+  function toggleSource(code: string) {
+    setSelectedSources((prev) => (prev.includes(code) ? prev.filter((x) => x !== code) : [...prev, code]));
+  }
+
+  const withCoords = useMemo(() => rows.filter((r) => typeof r.lat === "number" && typeof r.lng === "number"), [rows]);
+  const missingCoords = useMemo(() => rows.filter((r) => r.lat === null || r.lng === null), [rows]);
+
+  // Auto-load wenn workspace gesetzt ist
   useEffect(() => {
     if (workspaceId) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
 
-  // Wenn SourceTypes später geladen werden, default setzen
-  useEffect(() => {
-    setSelectedSources(defaultSources);
-  }, [defaultSources]);
-
-  function toggleSource(code: string) {
-    setSelectedSources((prev) => (prev.includes(code) ? prev.filter((x) => x !== code) : [...prev, code]));
-  }
-
-  const withCoords = rows.filter((r) => typeof r.lat === "number" && typeof r.lng === "number");
-  const missingCoords = rows.filter((r) => r.lat === null || r.lng === null);
-
   return (
     <div>
       <div className="row" style={{ alignItems: "flex-end" }}>
-        <div style={{ flex: "1 1 220px" }}>
+        <div style={{ flex: "1 1 240px" }}>
           <label>Workspace</label>
           <select className="input" value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)}>
             {workspaces.map((w) => (
@@ -126,21 +133,18 @@ export default function MapClient(props: { workspaces: Workspace[]; sourceTypes:
           </select>
         </div>
 
-        <div style={{ flex: "1 1 220px" }}>
+        <div style={{ flex: "1 1 240px" }}>
           <label>Gebiet</label>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", margin: 0 }}>
-              <input type="checkbox" checked={territoryOnly} onChange={(e) => setTerritoryOnly(e.target.checked)} />
-              Nur PLZ 35–36, 53–57, 60–69
-            </label>
-          </div>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", margin: 0 }}>
+            <input type="checkbox" checked={territoryOnly} onChange={(e) => setTerritoryOnly(e.target.checked)} />
+            Nur PLZ 35–36, 53–57, 60–69
+          </label>
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button className="btn secondary" onClick={load} disabled={loading || !workspaceId}>
             {loading ? "Lade..." : "Daten laden"}
           </button>
-
           <button className="btn" onClick={geocodeMissing} disabled={geocoding || !workspaceId || rows.length === 0}>
             {geocoding ? "Geocoding..." : "Koordinaten berechnen"}
           </button>
@@ -166,21 +170,17 @@ export default function MapClient(props: { workspaces: Workspace[]; sourceTypes:
       </div>
 
       <div style={{ marginTop: 10 }}>
-        <small>
-          Gesamt: {stats.total} · Angezeigt: {stats.shown} · Ohne Koordinaten: {stats.missingGeo}
-        </small>
+        <small>Gesamt: {stats.total} · Angezeigt: {stats.shown} · Ohne Koordinaten: {stats.missingGeo}</small>
         {error && <div><small style={{ color: "crimson" }}>{error}</small></div>}
         {missingCoords.length > 0 && (
           <div style={{ marginTop: 6 }}>
-            <small>
-              Tipp: Klicke „Koordinaten berechnen“ mehrmals (je ~15 Adressen), bis „Ohne Koordinaten“ bei 0 ist.
-            </small>
+            <small>Tipp: „Koordinaten berechnen“ mehrfach klicken (je ~15 Adressen), bis „Ohne Koordinaten“ klein ist.</small>
           </div>
         )}
       </div>
 
       <div style={{ marginTop: 12 }} className="map-wrap">
-        <LeafletMap locations={withCoords} />
+        <LeafletMap locations={withCoords as any} />
       </div>
 
       {missingCoords.length > 0 && (
