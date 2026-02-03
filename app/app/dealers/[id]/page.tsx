@@ -1,4 +1,3 @@
-// app/app/dealers/[id]/page.tsx
 export const dynamic = "force-dynamic";
 
 import DealerClient from "./DealerClient";

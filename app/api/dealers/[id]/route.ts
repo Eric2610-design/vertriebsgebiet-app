@@ -1,86 +1,131 @@
-// app/api/dealers/[id]/route.ts
-export const dynamic = "force-dynamic";
-
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const DEFAULT_SCHEMA = process.env.NEXT_PUBLIC_DB_SCHEMA || "app";
+function getAccessTokenFromCookies(): string | null {
+  const all = cookies().getAll();
 
-function adminClient() {
-  if (!SUPABASE_URL || !SERVICE_KEY) {
-    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
-  }
-  return createClient(SUPABASE_URL, SERVICE_KEY, {
+  // 1) klassisch: sb-access-token
+  const direct = all.find((c) => c.name === "sb-access-token")?.value;
+  if (direct) return direct;
+
+  // 2) auth-helpers cookie: sb-<project-ref>-auth-token
+  const authCookie = all.find(
+    (c) => c.name.startsWith("sb-") && c.name.endsWith("-auth-token")
+  )?.value;
+
+  if (!authCookie) return null;
+
+  const tryParse = (raw: string): any | null => {
+    try {
+      return JSON.parse(raw);
+    } catch {}
+    try {
+      return JSON.parse(decodeURIComponent(raw));
+    } catch {}
+    try {
+      const decoded = Buffer.from(raw, "base64").toString("utf8");
+      return JSON.parse(decoded);
+    } catch {}
+    return null;
+  };
+
+  const parsed = tryParse(authCookie);
+  if (!parsed) return null;
+
+  // manchmal Array, manchmal Objekt
+  const obj = Array.isArray(parsed) ? parsed[0] : parsed;
+  return obj?.access_token ?? null;
+}
+
+function supabaseUserClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const token = getAccessTokenFromCookies();
+
+  return createClient(url, anon, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
   });
 }
 
-function isUuid(v: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
-}
-
-async function loadFromSchema(schema: string, dealerId: string) {
-  const sb = adminClient().schema(schema);
-
-  const { data: dealer, error: dealerErr } = await sb
-    .from("dealers")
-    .select("*")
-    .eq("id", dealerId)
-    .maybeSingle();
-
-  if (dealerErr) return { ok: false as const, error: dealerErr };
-  if (!dealer) return { ok: false as const, error: { message: "dealer not found" } };
-
-  const { data: locations, error: locErr } = await sb
-    .from("dealer_locations")
-    .select("*")
-    .eq("dealer_id", dealerId);
-
-  const { data: links, error: linkErr } = await sb
-    .from("source_links")
-    .select("*")
-    .eq("dealer_id", dealerId);
-
-  return {
-    ok: true as const,
-    dealer,
-    // Damit dein Frontend weiterhin "locations" / "links" erwartet:
-    locations: locErr ? [] : (locations || []),
-    links: linkErr ? [] : (links || []),
-  };
-}
-
-export async function GET(_req: Request, ctx: { params: { id: string } }) {
+export async function GET(
+  _req: Request,
+  { params }: { params: { id: string } }
+) {
   try {
-    const id = ctx?.params?.id;
+    const dealerId = params.id;
 
-    if (!id || !isUuid(id)) {
+    if (!dealerId) {
+      return NextResponse.json({ ok: false, error: "missing dealer id" }, { status: 400 });
+    }
+
+    const supabase = supabaseUserClient();
+
+    // Auth check
+    const { data: userRes, error: userErr } = await supabase.auth.getUser();
+    if (userErr || !userRes?.user) {
+      return NextResponse.json({ ok: false, error: "not authenticated" }, { status: 401 });
+    }
+
+    // Dealer
+    const { data: dealer, error: dealerErr } = await supabase
+      .schema("app")
+      .from("dealers")
+      .select("id, workspace_id, name, email, phone, website, created_at")
+      .eq("id", dealerId)
+      .maybeSingle();
+
+    if (dealerErr) {
       return NextResponse.json(
-        { ok: false, error: "invalid dealer id" },
-        { status: 400 }
+        { ok: false, error: "DB error loading dealer", details: dealerErr },
+        { status: 500 }
+      );
+    }
+    if (!dealer) {
+      return NextResponse.json({ ok: false, error: "dealer not found" }, { status: 404 });
+    }
+
+    // Locations
+    const { data: locations, error: locErr } = await supabase
+      .schema("app")
+      .from("dealer_locations")
+      .select("id, label, street, zipcode, city, country, phone, email, website, lat, lng, is_primary")
+      .eq("dealer_id", dealerId)
+      .order("is_primary", { ascending: false });
+
+    if (locErr) {
+      return NextResponse.json(
+        { ok: false, error: "DB error loading locations", details: locErr },
+        { status: 500 }
       );
     }
 
-    const schemas = Array.from(new Set([DEFAULT_SCHEMA, "public"]));
-    let lastErr: any = null;
+    const primary = (locations ?? []).find((l) => l.is_primary) ?? (locations?.[0] ?? null);
 
-    for (const schema of schemas) {
-      const res = await loadFromSchema(schema, id);
-      if (res.ok) {
-        return NextResponse.json({ ok: true, schema, ...res });
-      }
-      lastErr = res.error;
-    }
+    const displayName =
+      (dealer.name && dealer.name.trim()) ||
+      (primary?.label && primary.label.trim()) ||
+      "(ohne Name)";
 
-    return NextResponse.json(
-      { ok: false, error: "DB error loading dealer", details: lastErr },
-      { status: 500 }
-    );
+    // Stammdaten-Fallbacks: wenn dealer.* leer ist, nimm primary.*
+    const outDealer = {
+      ...dealer,
+      display_name: displayName,
+      email: dealer.email || primary?.email || null,
+      phone: dealer.phone || primary?.phone || null,
+      website: dealer.website || primary?.website || null,
+    };
+
+    return NextResponse.json({
+      ok: true,
+      dealer: outDealer,
+      locations: locations ?? [],
+      primary_location: primary,
+    });
   } catch (e: any) {
     return NextResponse.json(
-      { ok: false, error: e?.message || String(e) },
+      { ok: false, error: "unexpected error", details: String(e?.message ?? e) },
       { status: 500 }
     );
   }
