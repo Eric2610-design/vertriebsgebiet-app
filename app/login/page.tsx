@@ -1,74 +1,80 @@
-import { loginPassword, sendMagicLink } from "./actions";
+// app/login/page.tsx
+"use client";
 
-export default function LoginPage({
-  searchParams,
-}: {
-  searchParams?: { next?: string; error?: string; sent?: string };
-}) {
-  const next = searchParams?.next || "/app";
-  const error = searchParams?.error;
-  const sent = searchParams?.sent === "1";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { createSupabaseBrowser } from "@/lib/supabase/browser";
+
+export default function LoginPage() {
+  const router = useRouter();
+  const sp = useSearchParams();
+  const next = sp.get("next") || "/app";
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    // optional: wenn Session schon da ist, direkt weiter
+    const supabase = createSupabaseBrowser();
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) router.replace("/app");
+    });
+  }, [router]);
+
+  async function onLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setErr(null);
+
+    try {
+      const supabase = createSupabaseBrowser();
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        setErr(error.message);
+        setBusy(false);
+        return;
+      }
+
+      // super wichtig: UI aktualisieren + middleware cookie refresh greifen lassen
+      router.replace(next);
+      router.refresh();
+    } catch (e: any) {
+      setErr(e?.message ?? "Unbekannter Fehler");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">Login</h1>
-        <p className="text-sm text-gray-600">Bitte einloggen, um fortzufahren.</p>
-      </div>
+    <div className="card">
+      <h2 style={{ marginTop: 0 }}>Login</h2>
 
-      {error ? (
-        <div className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </div>
-      ) : null}
-
-      {sent ? (
-        <div className="mb-4 rounded border border-green-200 bg-green-50 p-3 text-sm text-green-700">
-          Magic-Link wurde gesendet. Bitte Postfach prüfen.
-        </div>
-      ) : null}
-
-      <form className="rounded-lg border p-4">
-        <input type="hidden" name="next" value={next} />
-
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-sm font-medium">E-Mail</label>
-            <input
-              name="email"
-              type="email"
-              required
-              className="w-full rounded border px-3 py-2"
-              placeholder="name@firma.de"
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-sm font-medium">Passwort</label>
-            <input
-              name="password"
-              type="password"
-              className="w-full rounded border px-3 py-2"
-              placeholder="••••••••"
-            />
-          </div>
+      <form onSubmit={onLogin} style={{ display: "grid", gap: 12 }}>
+        <div style={{ display: "grid", gap: 6 }}>
+          <label>E-Mail</label>
+          <input value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-3">
-          <button
-            formAction={loginPassword}
-            className="rounded bg-black px-4 py-2 text-white"
-          >
-            Einloggen
-          </button>
-
-          <button
-            formAction={sendMagicLink}
-            className="rounded border px-4 py-2"
-          >
-            Wechsel: Magic-Link
-          </button>
+        <div style={{ display: "grid", gap: 6 }}>
+          <label>Passwort</label>
+          <input
+            value={password}
+            type="password"
+            onChange={(e) => setPassword(e.target.value)}
+          />
         </div>
+
+        {err && <div style={{ color: "crimson" }}>{err}</div>}
+
+        <button className="btn" disabled={busy}>
+          {busy ? "…" : "Einloggen"}
+        </button>
       </form>
     </div>
   );

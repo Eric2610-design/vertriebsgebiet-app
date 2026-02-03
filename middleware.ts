@@ -1,71 +1,62 @@
+// middleware.ts
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-function mustEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env var: ${name}`);
-  return v;
-}
-
-function supabaseKey(): string {
-  return (
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    ""
-  );
-}
-
 export async function middleware(request: NextRequest) {
-  const url = mustEnv("NEXT_PUBLIC_SUPABASE_URL");
-  const key = supabaseKey();
-  if (!key) throw new Error("Missing env var: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY (or NEXT_PUBLIC_SUPABASE_ANON_KEY)");
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-  // Wichtig: response MUSS die von Supabase gesetzten Cookies tragen
-  let response = NextResponse.next({ request });
+  // Wenn ENV fehlt -> Middleware würde crashen -> Vercel: MIDDLEWARE_INVOCATION_FAILED
+  if (!url || !anon) {
+    return NextResponse.next();
+  }
 
-  const supabase = createServerClient(url, key, {
+  let response = NextResponse.next({
+    request: { headers: request.headers },
+  });
+
+  const supabase = createServerClient(url, anon, {
     cookies: {
-      getAll() {
-        return request.cookies.getAll();
+      get(name: string) {
+        return request.cookies.get(name)?.value;
       },
-      setAll(cookiesToSet) {
-        // 1) Request-Cookies aktualisieren (wichtig für den laufenden Middleware-Flow)
-        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-
-        // 2) Response neu bauen und Cookies setzen
-        response = NextResponse.next({ request });
-        cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+      set(name: string, value: string, options: any) {
+        response.cookies.set({ name, value, ...options });
+      },
+      remove(name: string, options: any) {
+        response.cookies.set({ name, value: "", ...options, maxAge: 0 });
       },
     },
   });
 
-  // NICHTS zwischen createServerClient und getClaims() machen!
+  // triggert refresh + cookie-update
   const {
-    data: { claims },
-  } = await supabase.auth.getClaims();
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  const isProtected = request.nextUrl.pathname.startsWith("/app");
+  const path = request.nextUrl.pathname;
 
-  // Login & Auth callback NIE blockieren
-  const isLogin = request.nextUrl.pathname.startsWith("/login");
-  const isAuth = request.nextUrl.pathname.startsWith("/auth");
+  const isProtected = path.startsWith("/app");
+  const isLogin = path === "/login";
 
-  if (isProtected && !claims && !isLogin && !isAuth) {
+  if (isProtected && !user) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
-    loginUrl.searchParams.set(
-      "next",
-      request.nextUrl.pathname + request.nextUrl.search
-    );
+    loginUrl.searchParams.set("next", path + request.nextUrl.search);
     return NextResponse.redirect(loginUrl);
+  }
+
+  // Optional: wenn eingeloggt und /login -> direkt /app
+  if (isLogin && user) {
+    const appUrl = request.nextUrl.clone();
+    appUrl.pathname = "/app";
+    appUrl.search = "";
+    return NextResponse.redirect(appUrl);
   }
 
   return response;
 }
 
-// Matcht alles außer Next static/image + assets
 export const config = {
-  matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
-  ],
+  matcher: ["/app/:path*", "/login"],
 };
