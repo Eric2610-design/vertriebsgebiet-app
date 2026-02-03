@@ -3,5 +3,6 @@ export const dynamic = "force-dynamic";
 import DealerClient from "./DealerClient";
 
 export default function DealerPage({ params }: { params: { id: string } }) {
-  return <DealerClient dealerId={params.id} />;
+  // Übergabe als Prop (zusätzlich zu useParams im Client) => doppelt robust
+  return <DealerClient id={params.id} />;
 }
