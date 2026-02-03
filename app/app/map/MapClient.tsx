@@ -5,6 +5,9 @@ import dynamic from "next/dynamic";
 
 const LeafletMap = dynamic(() => import("./LeafletMap"), { ssr: false });
 
+type Workspace = { id: string; name: string };
+type SourceType = { code: string; name: string };
+
 type MapRow = {
   location_id: string;
   dealer_id: string;
@@ -22,11 +25,18 @@ type MapRow = {
   in_territory: boolean;
 };
 
-export default function MapClient() {
-  const [workspaceId, setWorkspaceId] = useState<string>("");
-  const [workspaces, setWorkspaces] = useState<{ id: string; name: string }[]>([]);
-  const [sourceTypes, setSourceTypes] = useState<{ code: string; name: string }[]>([]);
-  const [selectedSources, setSelectedSources] = useState<string[]>([]);
+function pickDefaultSources(sourceTypes: SourceType[]) {
+  const picks = sourceTypes
+    .filter((s) => /bico|zeg|riese|müller|mueller|\brm\b/i.test(`${s.code} ${s.name}`))
+    .map((s) => s.code);
+  return picks.length ? picks : sourceTypes.map((s) => s.code);
+}
+
+export default function MapClient(props: { workspaces: Workspace[]; sourceTypes: SourceType[] }) {
+  const { workspaces, sourceTypes } = props;
+
+  const [workspaceId, setWorkspaceId] = useState<string>(workspaces[0]?.id ?? "");
+  const [selectedSources, setSelectedSources] = useState<string[]>(pickDefaultSources(sourceTypes));
   const [territoryOnly, setTerritoryOnly] = useState(true);
 
   const [rows, setRows] = useState<MapRow[]>([]);
@@ -34,31 +44,6 @@ export default function MapClient() {
   const [loading, setLoading] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
   const [error, setError] = useState("");
-
-  // Meta laden (Workspaces + SourceTypes)
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/meta");
-        const j = await res.json();
-        if (!res.ok) throw new Error(j?.error ?? "Meta konnte nicht geladen werden.");
-
-        setWorkspaces(j.workspaces ?? []);
-        setSourceTypes(j.sourceTypes ?? []);
-
-        const ws0 = (j.workspaces?.[0]?.id as string) ?? "";
-        setWorkspaceId(ws0);
-
-        const picks = (j.sourceTypes ?? [])
-          .filter((s: any) => /bico|zeg|riese|müller|mueller|\brm\b/i.test(`${s.code} ${s.name}`))
-          .map((s: any) => s.code);
-
-        setSelectedSources(picks.length ? picks : (j.sourceTypes ?? []).map((s: any) => s.code));
-      } catch (e: any) {
-        setError(e?.message ?? "Meta-Fehler");
-      }
-    })();
-  }, []);
 
   async function load() {
     if (!workspaceId) return;
@@ -115,11 +100,14 @@ export default function MapClient() {
   const withCoords = useMemo(() => rows.filter((r) => typeof r.lat === "number" && typeof r.lng === "number"), [rows]);
   const missingCoords = useMemo(() => rows.filter((r) => r.lat === null || r.lng === null), [rows]);
 
-  // Auto reload wenn Filter sich ändern
   useEffect(() => {
-    if (workspaceId && selectedSources.length) load();
+    if (workspaceId) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, territoryOnly, selectedSources.join(",")]);
+
+  if (!workspaces.length) {
+    return <div>Kein Workspace gefunden (du bist vermutlich nicht als Member eingetragen).</div>;
+  }
 
   return (
     <div>
@@ -174,7 +162,7 @@ export default function MapClient() {
         {error && <div><small style={{ color: "crimson" }}>{error}</small></div>}
         {missingCoords.length > 0 && (
           <div style={{ marginTop: 6 }}>
-            <small>Tipp: Klicke „Koordinaten berechnen“ mehrfach (je ~15 Adressen), bis „Ohne Koordinaten“ klein ist.</small>
+            <small>Tipp: „Koordinaten berechnen“ mehrfach klicken (je ~15 Adressen), bis „Ohne Koordinaten“ klein ist.</small>
           </div>
         )}
       </div>
