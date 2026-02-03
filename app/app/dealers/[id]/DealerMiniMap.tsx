@@ -1,52 +1,50 @@
 "use client";
 
-import React, { useMemo } from "react";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { useEffect, useRef } from "react";
 import L from "leaflet";
 
-function icon() {
-  return L.divIcon({
-    className: "",
-    html: `<div class="marker-dot"></div>`,
-    iconSize: [12, 12],
-    iconAnchor: [6, 6],
-  });
-}
+export default function DealerMiniMap({ lat, lng }: { lat: number; lng: number }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const markerRef = useRef<L.Marker | null>(null);
 
-function fmtAddr(l: any) {
-  const street = l?.street ?? l?.address ?? null;
-  const zip = l?.zipcode ?? l?.zip ?? null;
-  const city = l?.city ?? null;
-  return [street, [zip, city].filter(Boolean).join(" ")].filter(Boolean).join(", ");
-}
+  useEffect(() => {
+    if (!ref.current) return;
 
-export default function DealerMiniMap({ locations }: { locations: any[] }) {
-  const pts = useMemo(() => {
-    return (locations ?? [])
-      .map((l: any) => ({
-        id: l?.id ?? fmtAddr(l),
-        lat: l?.lat ?? l?.latitude ?? null,
-        lng: l?.lng ?? l?.longitude ?? l?.lon ?? null,
-        label: fmtAddr(l),
-      }))
-      .filter((p: any) => typeof p.lat === "number" && typeof p.lng === "number");
-  }, [locations]);
+    if (!mapRef.current) {
+      const map = L.map(ref.current, {
+        zoomControl: true,
+        scrollWheelZoom: false,
+      }).setView([lat, lng], 14);
 
-  const center: [number, number] = pts.length ? [pts[0].lat, pts[0].lng] : [51.1657, 10.4515];
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "&copy; OpenStreetMap",
+      }).addTo(map);
+
+      const marker = L.marker([lat, lng]).addTo(map);
+
+      mapRef.current = map;
+      markerRef.current = marker;
+    } else {
+      mapRef.current.setView([lat, lng], 14);
+      markerRef.current?.setLatLng([lat, lng]);
+    }
+
+    return () => {
+      // nichts – Map bleibt für Performance bestehen
+    };
+  }, [lat, lng]);
 
   return (
-    <MapContainer center={center} zoom={pts.length ? 12 : 6} style={{ height: "100%", width: "100%" }}>
-      <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-      {pts.map((p: any) => (
-        <Marker key={p.id} position={[p.lat, p.lng]} icon={icon()}>
-          <Popup>
-            <div style={{ minWidth: 220 }}>
-              <b>Standort</b>
-              <div style={{ marginTop: 6 }}>{p.label || "—"}</div>
-            </div>
-          </Popup>
-        </Marker>
-      ))}
-    </MapContainer>
+    <div
+      ref={ref}
+      style={{
+        height: 240,
+        width: "100%",
+        borderRadius: 14,
+        overflow: "hidden",
+        border: "1px solid #eee",
+      }}
+    />
   );
 }
