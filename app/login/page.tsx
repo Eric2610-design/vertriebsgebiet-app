@@ -1,53 +1,49 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-
-export const dynamic = "force-dynamic";
+import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { createSupabaseBrowser } from "../../lib/supabase/browser";
 
 export default function LoginPage() {
-  const router = useRouter();
   const sp = useSearchParams();
+  const nextUrl = useMemo(() => sp.get("next") || "/app", [sp]);
 
-  const nextPath = useMemo(() => {
-    const n = sp?.get("next");
-    return n && n.startsWith("/app") ? n : "/app";
-  }, [sp]);
-
+  const supabase = useMemo(() => createSupabaseBrowser(), []);
   const [email, setEmail] = useState("");
-  const [pw, setPw] = useState("");
+  const [password, setPassword] = useState("");
+  const [mode, setMode] = useState<"password" | "magic">("password");
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  // optional: wenn du schon eingeloggt bist, direkt weiter
-  useEffect(() => {
-    // kein harter Check hier – der Guard passiert serverseitig im /app Layout
-    // (damit es nicht wieder looped)
-  }, []);
-
-  async function onLogin() {
-    setMsg(null);
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
     setLoading(true);
+    setMsg(null);
+
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ email, password: pw }),
-      });
+      if (mode === "password") {
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (error) throw error;
 
-      const json = await res.json().catch(() => ({}));
+        // HARTE Navigation -> Cookie ist sicher da, Server sieht User
+        window.location.assign(nextUrl);
+      } else {
+        const { error } = await supabase.auth.signInWithOtp({
+          email,
+          options: {
+            emailRedirectTo: `${window.location.origin}${nextUrl}`,
+          },
+        });
+        if (error) throw error;
 
-      if (!res.ok || !json?.ok) {
-        setMsg(json?.error ?? "Login fehlgeschlagen.");
-        setLoading(false);
-        return;
+        setMsg("Magic-Link wurde gesendet. Bitte E-Mail öffnen.");
       }
-
-      // WICHTIG: harte Navigation, damit Cookies sicher greifen
-      window.location.href = nextPath;
-    } catch (e: any) {
-      setMsg(e?.message ?? "Login fehlgeschlagen.");
+    } catch (err: any) {
+      setMsg(err?.message || "Login fehlgeschlagen.");
+    } finally {
       setLoading(false);
     }
   }
@@ -56,45 +52,45 @@ export default function LoginPage() {
     <div className="card">
       <h2 style={{ marginTop: 0 }}>Login</h2>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <div>
+      <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
+        <div style={{ display: "grid", gap: 6 }}>
           <label>E-Mail</label>
           <input
-            className="input"
-            placeholder="name@firma.de"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            autoComplete="username"
+            placeholder="name@firma.de"
+            required
           />
         </div>
 
-        <div>
-          <label>Passwort</label>
-          <input
-            className="input"
-            type="password"
-            value={pw}
-            onChange={(e) => setPw(e.target.value)}
-            autoComplete="current-password"
-          />
+        {mode === "password" && (
+          <div style={{ display: "grid", gap: 6 }}>
+            <label>Passwort</label>
+            <input
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              type="password"
+              required
+            />
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="btn primary" disabled={loading} type="submit">
+            {loading ? "…" : "Einloggen"}
+          </button>
+
+          <button
+            className="btn secondary"
+            type="button"
+            onClick={() => setMode(mode === "password" ? "magic" : "password")}
+          >
+            Wechsel: {mode === "password" ? "Magic-Link" : "Passwort"}
+          </button>
         </div>
-      </div>
 
-      <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-        <button className="btn" onClick={onLogin} disabled={loading}>
-          {loading ? "…" : "Einloggen"}
-        </button>
-
-        <a className="btn secondary" href="/app">
-          Dashboard
-        </a>
-      </div>
-
-      {msg && (
-        <div style={{ marginTop: 10 }}>
-          <small style={{ color: "crimson" }}>{msg}</small>
-        </div>
-      )}
+        {msg && <p style={{ color: "crimson", margin: 0 }}>{msg}</p>}
+      </form>
     </div>
   );
 }

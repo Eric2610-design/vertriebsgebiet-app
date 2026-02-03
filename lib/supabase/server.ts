@@ -1,31 +1,22 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
-function must(name: string) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env var: ${name}`);
-  return v;
-}
-
 export function createSupabaseServer() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   const cookieStore = cookies();
 
-  return createServerClient(
-    must("NEXT_PUBLIC_SUPABASE_URL"),
-    must("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
-    {
-      db: { schema: "app" }, // <-- wichtig
-      cookies: {
-        get(name) {
-          return cookieStore.get(name)?.value;
-        },
-        set(name, value, options) {
-          cookieStore.set({ name, value, ...options });
-        },
-        remove(name, options) {
-          cookieStore.set({ name, value: "", ...options });
-        },
+  return createServerClient(url, anon, {
+    cookies: {
+      get(name: string) {
+        return cookieStore.get(name)?.value;
       },
-    }
-  );
+      set() {
+        // Server Components dürfen keine Cookies setzen -> macht die Middleware
+      },
+      remove() {
+        // Server Components dürfen keine Cookies setzen -> macht die Middleware
+      },
+    },
+  });
 }
