@@ -48,7 +48,7 @@ function FitToPoints({ points }: { points: { lat: number; lng: number }[] }) {
 function ClusterLayer({ locations }: { locations: MapRow[] }) {
   const map = useMap();
   const [zoom, setZoom] = useState<number>(6);
-  const [bbox, setBbox] = useState<[number, number, number, number]>([5, 47, 16, 55]); // grob DE
+  const [bbox, setBbox] = useState<[number, number, number, number]>([5, 47, 16, 55]);
 
   useMapEvents({
     moveend() {
@@ -64,36 +64,27 @@ function ClusterLayer({ locations }: { locations: MapRow[] }) {
   });
 
   const index = useMemo(() => {
-    const sc = new Supercluster({
-      radius: 60,
-      maxZoom: 18,
-    });
-
-    const features = locations.map((l) => ({
-      type: "Feature" as const,
-      properties: {
-        cluster: false,
-        location_id: l.location_id,
-        dealer_id: l.dealer_id,
-        dealer_name: l.dealer_name,
-        street: l.street,
-        zipcode: l.zipcode,
-        city: l.city,
-        sources: l.sources,
-      },
-      geometry: {
-        type: "Point" as const,
-        coordinates: [l.lng, l.lat],
-      },
-    }));
-
-    sc.load(features as any);
+    const sc = new Supercluster({ radius: 60, maxZoom: 18 });
+    sc.load(
+      locations.map((l) => ({
+        type: "Feature",
+        properties: {
+          cluster: false,
+          location_id: l.location_id,
+          dealer_id: l.dealer_id,
+          dealer_name: l.dealer_name,
+          street: l.street,
+          zipcode: l.zipcode,
+          city: l.city,
+          sources: l.sources,
+        },
+        geometry: { type: "Point", coordinates: [l.lng, l.lat] },
+      })) as any
+    );
     return sc;
   }, [locations]);
 
-  const clusters = useMemo(() => {
-    return index.getClusters(bbox, Math.round(zoom)) as any[];
-  }, [index, bbox, zoom]);
+  const clusters = useMemo(() => index.getClusters(bbox, Math.round(zoom)) as any[], [index, bbox, zoom]);
 
   return (
     <>
@@ -104,7 +95,6 @@ function ClusterLayer({ locations }: { locations: MapRow[] }) {
         if (isCluster) {
           const clusterId = c.id as number;
           const pointCount = c.properties.point_count as number;
-
           return (
             <Marker
               key={`cluster-${clusterId}`}
@@ -112,8 +102,8 @@ function ClusterLayer({ locations }: { locations: MapRow[] }) {
               icon={clusterIcon(pointCount)}
               eventHandlers={{
                 click: () => {
-                  const expansionZoom = Math.min(index.getClusterExpansionZoom(clusterId), 18);
-                  map.setView([lat, lng], expansionZoom);
+                  const z = Math.min(index.getClusterExpansionZoom(clusterId), 18);
+                  map.setView([lat, lng], z);
                 },
               }}
             />
@@ -121,21 +111,12 @@ function ClusterLayer({ locations }: { locations: MapRow[] }) {
         }
 
         const p = c.properties;
-        const dealerId = p.dealer_id as string;
-
         return (
           <Marker key={p.location_id} position={[lat, lng]} icon={dotIcon("marker-dot")}>
             <Popup>
               <div style={{ minWidth: 220 }}>
                 <div style={{ fontWeight: 800 }}>{p.dealer_name}</div>
-                <small>
-                  {[p.street, `${p.zipcode ?? ""} ${p.city ?? ""}`].filter(Boolean).join(", ")}
-                </small>
-                <div style={{ marginTop: 8 }}>
-                  <a className="btn secondary" href={`/app/dealers/${dealerId}`} target="_blank" rel="noreferrer">
-                    Details
-                  </a>
-                </div>
+                <small>{[p.street, `${p.zipcode ?? ""} ${p.city ?? ""}`].filter(Boolean).join(", ")}</small>
                 <div style={{ marginTop: 8 }}>
                   <small>Quellen: {(p.sources ?? []).join(", ")}</small>
                 </div>
@@ -150,16 +131,11 @@ function ClusterLayer({ locations }: { locations: MapRow[] }) {
 
 export default function LeafletMap({ locations }: { locations: MapRow[] }) {
   const points = useMemo(() => locations.map((l) => ({ lat: l.lat, lng: l.lng })), [locations]);
-
-  // Fallback-Start: Mitte DE
-  const center: [number, number] = [51.1657, 10.4515];
+  const center: [number, number] = [51.1657, 10.4515]; // Mitte DE
 
   return (
     <MapContainer center={center} zoom={6} style={{ height: "100%", width: "100%" }}>
-      <TileLayer
-        attribution='&copy; OpenStreetMap contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
+      <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
       <FitToPoints points={points} />
       <ClusterLayer locations={locations} />
     </MapContainer>
