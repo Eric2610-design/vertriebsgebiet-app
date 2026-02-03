@@ -1,203 +1,272 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import React, { useEffect, useMemo, useState } from 'react';
+import DealerMiniMap from './DealerMiniMap';
 
-type AnyRow = Record<string, any>;
+type Dealer = {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+};
 
-function firstNonEmpty(obj: AnyRow | null | undefined, keys: string[]) {
-  if (!obj) return "";
-  for (const k of keys) {
-    const v = obj[k];
-    if (v === null || v === undefined) continue;
-    const s = String(v).trim();
-    if (s) return s;
-  }
-  return "";
+type Location = {
+  id: string;
+  dealer_id?: string;
+  label?: string | null;
+  street?: string | null;
+  zipcode?: string | null;
+  city?: string | null;
+  country?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  website?: string | null;
+  is_primary?: boolean | null;
+  lat?: number | null;
+  lng?: number | null;
+};
+
+type Note = {
+  id: string;
+  text?: string | null;
+  created_at?: string | null;
+  created_by?: string | null;
+};
+
+type SourceLink = {
+  id: string;
+  url?: string | null;
+  label?: string | null;
+  source_type?: string | null;
+};
+
+function clean(v?: string | null) {
+  const s = (v ?? '').toString().trim();
+  return s.length ? s : '';
 }
 
-function joinParts(parts: (string | undefined | null)[], sep = " ") {
-  return parts.map(p => (p || "").trim()).filter(Boolean).join(sep);
+function fmtAddress(loc?: Location | null) {
+  if (!loc) return '';
+  const parts = [clean(loc.street), [clean(loc.zipcode), clean(loc.city)].filter(Boolean).join(' '), clean(loc.country)]
+    .filter(Boolean)
+    .join(', ');
+  return parts;
 }
 
-function formatAddress(loc: AnyRow | null | undefined) {
-  const street = firstNonEmpty(loc, ["street", "adresse", "address", "line1"]);
-  const zip = firstNonEmpty(loc, ["zip", "zipcode", "postal_code", "plz", "postcode"]);
-  const city = firstNonEmpty(loc, ["city", "ort", "town"]);
-  const country = firstNonEmpty(loc, ["country", "country_code", "laendercode", "countrycode"]);
-  const line = joinParts([street]);
-  const line2 = joinParts([zip, city], " ");
-  const line3 = country ? country : "";
-  return [line, line2, line3].filter(Boolean).join(", ");
+function isUuid(s: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
 }
 
 export default function DealerClient({ dealerId }: { dealerId: string }) {
-  const sp = useSearchParams();
-  const debug = sp.get("debug") === "1";
-
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string>("");
-  const [raw, setRaw] = useState<any>(null);
+  const [err, setErr] = useState<string>('');
+  const [dealer, setDealer] = useState<Dealer | null>(null);
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [links, setLinks] = useState<SourceLink[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
 
-  const dealer: AnyRow | null = raw?.dealer || raw?.data?.dealer || raw?.data || null;
-  const locations: AnyRow[] = raw?.locations || raw?.data?.locations || [];
-  const links: AnyRow[] = raw?.links || raw?.data?.links || [];
+  const [newNote, setNewNote] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
 
-  const mainLocation = useMemo(() => (locations && locations.length ? locations[0] : null), [locations]);
+  const primaryLoc = useMemo(() => {
+    if (!locations?.length) return null;
+    const primary = locations.find((l) => l.is_primary);
+    return primary ?? locations[0];
+  }, [locations]);
 
-  const name = useMemo(() => {
-    return (
-      firstNonEmpty(dealer, ["name", "dealer_name", "company"]) ||
-      "(ohne Name)"
-    );
-  }, [dealer]);
-
-  const address = useMemo(() => {
-    // 1) Wenn Dealer selbst Adressfelder hat
-    const dealerAddr = joinParts([
-      firstNonEmpty(dealer, ["street", "address"]),
-      joinParts([firstNonEmpty(dealer, ["zip", "zipcode", "postal_code"]), firstNonEmpty(dealer, ["city"])], " "),
-      firstNonEmpty(dealer, ["country", "country_code"]),
-    ], ", ");
-
-    // 2) Sonst aus 1. Standort
-    const locAddr = formatAddress(mainLocation);
-
-    return (dealerAddr && dealerAddr !== ",") ? dealerAddr : (locAddr || "-");
-  }, [dealer, mainLocation]);
-
-  const phone = useMemo(() => {
-    return (
-      firstNonEmpty(dealer, ["phone", "tel", "telephone"]) ||
-      firstNonEmpty(mainLocation, ["phone", "tel", "telephone", "telefonnr"]) ||
-      "-"
-    );
-  }, [dealer, mainLocation]);
-
-  const email = useMemo(() => {
-    return (
-      firstNonEmpty(dealer, ["email", "e_mail", "mail"]) ||
-      firstNonEmpty(mainLocation, ["email", "e_mail", "mail"]) ||
-      "-"
-    );
-  }, [dealer, mainLocation]);
-
-  const website = useMemo(() => {
-    return (
-      firstNonEmpty(dealer, ["website", "homepage", "url", "web"]) ||
-      firstNonEmpty(mainLocation, ["website", "homepage", "url", "web"]) ||
-      "-"
-    );
-  }, [dealer, mainLocation]);
+  const displayName = useMemo(() => {
+    const dn =
+      clean(dealer?.name) ||
+      clean(primaryLoc?.label) ||
+      // notfalls: aus Adresse irgendwas basteln, damit es nie leer ist
+      (clean(primaryLoc?.city) ? `Händler (${clean(primaryLoc?.city)})` : '');
+    return dn || '(ohne Name)';
+  }, [dealer?.name, primaryLoc?.label, primaryLoc?.city]);
 
   async function load() {
+    setErr('');
     setLoading(true);
-    setErr("");
+
     try {
-      const res = await fetch(`/api/dealers/${dealerId}`, { cache: "no-store" });
-      const text = await res.text();
-
-      // Falls irgendwas HTML zurückkommt (Next 404 Seite), siehst du es direkt.
-      let json: any = null;
-      try {
-        json = JSON.parse(text);
-      } catch {
-        throw new Error(`API hat kein JSON geliefert (Status ${res.status}). Antwort beginnt mit: ${text.slice(0, 80)}`);
+      if (!dealerId || !isUuid(dealerId)) {
+        throw new Error(`Ungültige Händler-ID: ${dealerId || '(leer)'}`);
       }
 
-      if (!res.ok || !json?.ok) {
+      const res = await fetch(`/api/dealers/${encodeURIComponent(dealerId)}`, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+
+      const ct = res.headers.get('content-type') || '';
+      if (!res.ok) {
+        const body = ct.includes('application/json') ? await res.json().catch(() => null) : await res.text().catch(() => '');
         const msg =
-          json?.error ||
-          `API Fehler (Status ${res.status})`;
-        const details = json?.details ? JSON.stringify(json.details) : "";
-        throw new Error(details ? `${msg}: ${details}` : msg);
+          typeof body === 'string'
+            ? body
+            : body?.error?.message || body?.message || JSON.stringify(body ?? { status: res.status });
+        throw new Error(msg);
       }
 
-      setRaw(json);
+      // JSON erwarten
+      const payload: any = ct.includes('application/json') ? await res.json() : null;
+      if (!payload) throw new Error('API hat keine JSON-Antwort geliefert.');
+
+      // flexible shape
+      const d: Dealer | null = payload.dealer ?? payload.data?.dealer ?? payload?.dealer_row ?? null;
+      const locs: Location[] = payload.locations ?? payload.data?.locations ?? payload?.dealer_locations ?? [];
+      const lks: SourceLink[] = payload.links ?? payload.data?.links ?? payload?.source_links ?? [];
+      const nts: Note[] = payload.notes ?? payload.data?.notes ?? payload?.dealer_notes ?? [];
+
+      setDealer(d);
+      setLocations(Array.isArray(locs) ? locs : []);
+      setLinks(Array.isArray(lks) ? lks : []);
+      setNotes(Array.isArray(nts) ? nts : []);
     } catch (e: any) {
-      setErr(e?.message || String(e));
-      setRaw(null);
+      setErr(e?.message ? String(e.message) : String(e));
+      setDealer(null);
+      setLocations([]);
+      setLinks([]);
+      setNotes([]);
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    if (!dealerId) {
-      setErr("Dealer-ID fehlt");
-      setLoading(false);
-      return;
+  async function addNote() {
+    const text = newNote.trim();
+    if (!text) return;
+    setSavingNote(true);
+    try {
+      const res = await fetch(`/api/dealers/${encodeURIComponent(dealerId)}/notes`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const ct = res.headers.get('content-type') || '';
+      if (!res.ok) {
+        const body = ct.includes('application/json') ? await res.json().catch(() => null) : await res.text().catch(() => '');
+        throw new Error(typeof body === 'string' ? body : body?.error?.message || body?.message || 'Fehler beim Speichern.');
+      }
+      setNewNote('');
+      await load();
+    } catch (e: any) {
+      setErr(e?.message ? String(e.message) : String(e));
+    } finally {
+      setSavingNote(false);
     }
+  }
+
+  useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dealerId]);
 
   return (
     <div className="card">
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div>
-          <h2 style={{ marginTop: 0 }}>{name}</h2>
-          <div style={{ opacity: 0.8, fontSize: 13 }}>ID: {dealerId}</div>
+          <h1 style={{ marginTop: 0 }}>{loading ? 'Lade…' : displayName}</h1>
+          <small style={{ opacity: 0.8 }}>ID: {dealerId}</small>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Link className="btn secondary" href="/app/map">Zur Karte</Link>
-          <Link className="btn secondary" href="/app">Dashboard</Link>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <a className="btn secondary" href="/app/map">
+            Zur Karte
+          </a>
+          <a className="btn secondary" href="/app">
+            Dashboard
+          </a>
         </div>
       </div>
 
-      {loading && <p style={{ marginTop: 12 }}>Lade Daten…</p>}
-
-      {!loading && err && (
+      {err && (
         <div style={{ marginTop: 12 }}>
-          <p style={{ color: "#b00020", whiteSpace: "pre-wrap" }}><b>Fehler:</b> {err}</p>
-          <button className="btn" onClick={load}>Neu laden</button>
+          <div style={{ color: '#b00020', fontWeight: 600 }}>Fehler</div>
+          <div style={{ color: '#b00020', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{err}</div>
+          <button className="btn" style={{ marginTop: 10 }} onClick={load}>
+            Neu laden
+          </button>
         </div>
       )}
 
-      {!loading && !err && (
+      {!err && loading && <p style={{ marginTop: 12 }}>Lade Händlerdaten…</p>}
+
+      {!err && !loading && (
         <>
+          {/* Stammdaten */}
           <div className="card" style={{ marginTop: 14 }}>
-            <h3 style={{ marginTop: 0 }}>Stammdaten</h3>
-            <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", rowGap: 8, columnGap: 12 }}>
-              <div style={{ opacity: 0.75 }}>Adresse</div><div>{address}</div>
-              <div style={{ opacity: 0.75 }}>Telefon</div><div>{phone}</div>
-              <div style={{ opacity: 0.75 }}>E-Mail</div><div>{email}</div>
-              <div style={{ opacity: 0.75 }}>Webseite</div>
+            <h2 style={{ marginTop: 0 }}>Stammdaten</h2>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', rowGap: 8, columnGap: 16 }}>
+              <div style={{ opacity: 0.8 }}>Adresse</div>
+              <div>{fmtAddress(primaryLoc) || '-'}</div>
+
+              <div style={{ opacity: 0.8 }}>Telefon</div>
+              <div>{clean(dealer?.phone) || clean(primaryLoc?.phone) || '-'}</div>
+
+              <div style={{ opacity: 0.8 }}>E-Mail</div>
+              <div>{clean(dealer?.email) || clean(primaryLoc?.email) || '-'}</div>
+
+              <div style={{ opacity: 0.8 }}>Webseite</div>
               <div>
-                {website !== "-" ? (
-                  <a href={website.startsWith("http") ? website : `https://${website}`} target="_blank" rel="noreferrer">
-                    {website}
+                {clean(dealer?.website) || clean(primaryLoc?.website) ? (
+                  <a href={clean(dealer?.website) || clean(primaryLoc?.website)} target="_blank" rel="noreferrer">
+                    {clean(dealer?.website) || clean(primaryLoc?.website)}
                   </a>
                 ) : (
-                  "-"
+                  '-'
                 )}
               </div>
             </div>
           </div>
 
+          {/* Mini Map */}
           <div className="card" style={{ marginTop: 14 }}>
-            <h3 style={{ marginTop: 0 }}>Standorte ({locations?.length || 0})</h3>
+            <h2 style={{ marginTop: 0 }}>Karte</h2>
+            <DealerMiniMap locations={locations as any} />
+          </div>
 
-            {(!locations || locations.length === 0) ? (
-              <p style={{ opacity: 0.8 }}>Keine Standorte vorhanden.</p>
-            ) : (
-              <div style={{ display: "grid", gap: 10 }}>
-                {locations.map((loc, idx) => {
-                  const title = firstNonEmpty(loc, ["label", "name", "standort"]) || `Standort ${idx + 1}`;
-                  const addr = formatAddress(loc) || "-";
-                  const ph = firstNonEmpty(loc, ["phone", "tel", "telephone"]) || "-";
-                  const em = firstNonEmpty(loc, ["email"]) || "-";
-                  const web = firstNonEmpty(loc, ["website", "homepage", "url"]) || "-";
+          {/* Standorte */}
+          <div className="card" style={{ marginTop: 14 }}>
+            <h2 style={{ marginTop: 0 }}>Standorte ({locations.length})</h2>
 
+            {!locations.length && <p style={{ opacity: 0.8 }}>Keine Standorte vorhanden.</p>}
+
+            {!!locations.length && (
+              <div style={{ display: 'grid', gap: 12 }}>
+                {locations.map((loc) => {
+                  const title = clean(loc.label) || (loc.is_primary ? 'Hauptadresse' : 'Standort');
                   return (
-                    <div key={loc.id || idx} className="card" style={{ margin: 0 }}>
-                      <div style={{ fontWeight: 700 }}>{title}</div>
-                      <div style={{ opacity: 0.9, marginTop: 6 }}>{addr}</div>
-                      <div style={{ marginTop: 6, display: "grid", gridTemplateColumns: "120px 1fr", rowGap: 6, columnGap: 12 }}>
-                        <div style={{ opacity: 0.75 }}>Telefon</div><div>{ph}</div>
-                        <div style={{ opacity: 0.75 }}>E-Mail</div><div>{em}</div>
-                        <div style={{ opacity: 0.75 }}>Webseite</div><div>{web}</div>
+                    <div key={loc.id} className="card">
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>{title}</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', rowGap: 6, columnGap: 16 }}>
+                        <div style={{ opacity: 0.8 }}>Adresse</div>
+                        <div>{fmtAddress(loc) || '-'}</div>
+
+                        <div style={{ opacity: 0.8 }}>Telefon</div>
+                        <div>{clean(loc.phone) || '-'}</div>
+
+                        <div style={{ opacity: 0.8 }}>E-Mail</div>
+                        <div>{clean(loc.email) || '-'}</div>
+
+                        <div style={{ opacity: 0.8 }}>Webseite</div>
+                        <div>
+                          {clean(loc.website) ? (
+                            <a href={clean(loc.website)} target="_blank" rel="noreferrer">
+                              {clean(loc.website)}
+                            </a>
+                          ) : (
+                            '-'
+                          )}
+                        </div>
+
+                        <div style={{ opacity: 0.8 }}>Koordinaten</div>
+                        <div>
+                          {loc.lat != null && loc.lng != null ? `${loc.lat}, ${loc.lng}` : '-'}
+                        </div>
                       </div>
                     </div>
                   );
@@ -206,14 +275,61 @@ export default function DealerClient({ dealerId }: { dealerId: string }) {
             )}
           </div>
 
-          {debug && (
+          {/* Quellen / Links */}
+          {links.length > 0 && (
             <div className="card" style={{ marginTop: 14 }}>
-              <h3 style={{ marginTop: 0 }}>Debug</h3>
-              <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, maxHeight: 350, overflow: "auto" }}>
-                {JSON.stringify({ dealer, locations, links, raw }, null, 2)}
-              </pre>
+              <h2 style={{ marginTop: 0 }}>Quellen</h2>
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {links.map((l) => (
+                  <li key={l.id}>
+                    <a href={clean(l.url) || '#'} target="_blank" rel="noreferrer">
+                      {clean(l.label) || clean(l.url) || '(ohne Link)'}
+                    </a>
+                    {clean(l.source_type) ? <span style={{ opacity: 0.7 }}> — {l.source_type}</span> : null}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
+
+          {/* Notizen */}
+          <div className="card" style={{ marginTop: 14 }}>
+            <h2 style={{ marginTop: 0 }}>Notizen</h2>
+
+            {notes.length === 0 && <p style={{ opacity: 0.8 }}>Noch keine Notizen.</p>}
+
+            {notes.length > 0 && (
+              <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
+                {notes.map((n) => (
+                  <div key={n.id} className="card">
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{clean(n.text) || '-'}</div>
+                    <div style={{ marginTop: 6, opacity: 0.7, fontSize: 12 }}>
+                      {clean(n.created_at) ? new Date(n.created_at as string).toLocaleString() : ''}
+                      {clean(n.created_by) ? ` — ${n.created_by}` : ''}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gap: 8 }}>
+              <textarea
+                className="input"
+                rows={3}
+                placeholder="Neue Notiz…"
+                value={newNote}
+                onChange={(e) => setNewNote(e.target.value)}
+              />
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="btn" onClick={addNote} disabled={savingNote || !newNote.trim()}>
+                  {savingNote ? 'Speichere…' : 'Notiz speichern'}
+                </button>
+                <button className="btn secondary" onClick={load}>
+                  Aktualisieren
+                </button>
+              </div>
+            </div>
+          </div>
         </>
       )}
     </div>
