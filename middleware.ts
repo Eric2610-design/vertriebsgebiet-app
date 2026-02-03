@@ -1,31 +1,72 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { createServerClient } from "@supabase/ssr";
+import { NextRequest, NextResponse } from "next/server";
 
-export async function middleware(request: NextRequest) {
-  const response = NextResponse.next();
+function tryParseAuthCookie(raw: string): any | null {
+  // raw kann JSON, URL-encoded JSON oder base64 JSON sein
+  try {
+    return JSON.parse(raw);
+  } catch {}
+  try {
+    return JSON.parse(decodeURIComponent(raw));
+  } catch {}
+  try {
+    const decoded = Buffer.from(raw, "base64").toString("utf8");
+    return JSON.parse(decoded);
+  } catch {}
+  return null;
+}
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) { return request.cookies.get(name)?.value; },
-        set(name: string, value: string, options: any) { response.cookies.set({ name, value, ...options }); },
-        remove(name: string, options: any) { response.cookies.set({ name, value: "", ...options }); },
-      },
-    }
-  );
+function getAccessToken(req: NextRequest): string | null {
+  const all = req.cookies.getAll();
 
-  const { data } = await supabase.auth.getUser();
+  // 1) Manche Setups setzen direkt sb-access-token
+  const direct = all.find((c) => c.name === "sb-access-token")?.value;
+  if (direct) return direct;
 
-  if (request.nextUrl.pathname.startsWith("/app") && !data.user) {
-    const url = request.nextUrl.clone();
+  // 2) Üblich: sb-<project-ref>-auth-token
+  const authCookie = all.find(
+    (c) => c.name.startsWith("sb-") && c.name.endsWith("-auth-token")
+  )?.value;
+
+  if (!authCookie) return null;
+
+  const parsed = tryParseAuthCookie(authCookie);
+  if (!parsed) return null;
+
+  // manchmal Array, manchmal Objekt
+  const obj = Array.isArray(parsed) ? parsed[0] : parsed;
+
+  return obj?.access_token ?? null;
+}
+
+export function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+
+  // Alles außerhalb /app nicht anfassen
+  // (und /api, /_next, assets sowieso nie blocken)
+  if (
+    !pathname.startsWith("/app") ||
+    pathname.startsWith("/api") ||
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/favicon") ||
+    pathname.startsWith("/login")
+  ) {
+    return NextResponse.next();
+  }
+
+  const token = getAccessToken(req);
+
+  // Wenn kein Token -> ab zur Login-Seite
+  if (!token) {
+    const url = req.nextUrl.clone();
     url.pathname = "/login";
-    url.searchParams.set("next", request.nextUrl.pathname);
+    url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);
   }
 
-  return response;
+  return NextResponse.next();
 }
 
-export const config = { matcher: ["/app/:path*"] };
+// Nur /app/* schützen
+export const config = {
+  matcher: ["/app/:path*"],
+};
