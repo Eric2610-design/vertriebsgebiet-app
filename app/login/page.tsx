@@ -1,98 +1,100 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { createSupabaseBrowser } from "../../lib/supabase/browser";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+
+export const dynamic = "force-dynamic";
 
 export default function LoginPage() {
-  const supabase = useMemo(() => createSupabaseBrowser(), []);
-  if (!supabase) {
-  return (
-    <div className="card">
-      <h2 style={{ marginTop: 0 }}>Konfiguration fehlt</h2>
-      <p>
-        <small>
-          In Vercel fehlen NEXT_PUBLIC_SUPABASE_URL oder NEXT_PUBLIC_SUPABASE_ANON_KEY (häufig im Preview-Environment).
-        </small>
-      </p>
-    </div>
-  );
-}
+  const router = useRouter();
+  const sp = useSearchParams();
 
-if (!supabase) {
-  return (
-    <div className="card">
-      <h2 style={{marginTop:0}}>Konfiguration fehlt</h2>
-      <p><small>
-        In Vercel fehlen NEXT_PUBLIC_SUPABASE_URL oder NEXT_PUBLIC_SUPABASE_ANON_KEY (oft nur im Preview-Environment).
-      </small></p>
-    </div>
-  );
-}
+  const nextPath = useMemo(() => {
+    const n = sp?.get("next");
+    return n && n.startsWith("/app") ? n : "/app";
+  }, [sp]);
 
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"password" | "magic">("password");
+  const [pw, setPw] = useState("");
+  const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
-  async function onLogin(e: React.FormEvent) {
-    e.preventDefault();
+  // optional: wenn du schon eingeloggt bist, direkt weiter
+  useEffect(() => {
+    // kein harter Check hier – der Guard passiert serverseitig im /app Layout
+    // (damit es nicht wieder looped)
+  }, []);
+
+  async function onLogin() {
     setMsg(null);
-    setBusy(true);
+    setLoading(true);
     try {
-      if (mode === "password") {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        window.location.href = "/app";
-      } else {
-        const { error } = await supabase.auth.signInWithOtp({
-          email,
-          options: { emailRedirectTo: `${window.location.origin}/app` }
-        });
-        if (error) throw error;
-        setMsg("Magic-Link wurde verschickt. Öffne die Mail auf demselben Gerät/Browser.");
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ email, password: pw }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok || !json?.ok) {
+        setMsg(json?.error ?? "Login fehlgeschlagen.");
+        setLoading(false);
+        return;
       }
-    } catch (err: any) {
-      setMsg(err?.message ?? "Login fehlgeschlagen.");
-    } finally {
-      setBusy(false);
+
+      // WICHTIG: harte Navigation, damit Cookies sicher greifen
+      window.location.href = nextPath;
+    } catch (e: any) {
+      setMsg(e?.message ?? "Login fehlgeschlagen.");
+      setLoading(false);
     }
   }
 
   return (
     <div className="card">
-      <h2 style={{marginTop:0}}>Login</h2>
-      <form onSubmit={onLogin}>
-        <div className="row">
-          <div style={{flex:"1 1 280px"}}>
-            <label>E-Mail</label>
-            <input className="input" value={email} onChange={(e)=>setEmail(e.target.value)} placeholder="name@firma.de" />
-          </div>
-          {mode === "password" && (
-            <div style={{flex:"1 1 280px"}}>
-              <label>Passwort</label>
-              <input className="input" type="password" value={password} onChange={(e)=>setPassword(e.target.value)} />
-            </div>
-          )}
+      <h2 style={{ marginTop: 0 }}>Login</h2>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div>
+          <label>E-Mail</label>
+          <input
+            className="input"
+            placeholder="name@firma.de"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="username"
+          />
         </div>
 
-        <div style={{display:"flex", gap:10, marginTop:12, alignItems:"center", flexWrap:"wrap"}}>
-          <button className="btn" disabled={busy || !email || (mode==="password" && !password)}>
-            {busy ? "Bitte warten…" : (mode==="password" ? "Einloggen" : "Magic-Link senden")}
-          </button>
-
-          <button
-            type="button"
-            className="btn secondary"
-            onClick={() => setMode(mode === "password" ? "magic" : "password")}
-            disabled={busy}
-          >
-            Wechsel: {mode === "password" ? "Magic-Link" : "Passwort"}
-          </button>
+        <div>
+          <label>Passwort</label>
+          <input
+            className="input"
+            type="password"
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            autoComplete="current-password"
+          />
         </div>
+      </div>
 
-        {msg && <p style={{marginBottom:0, marginTop:12}}><small>{msg}</small></p>}
-      </form>
+      <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+        <button className="btn" onClick={onLogin} disabled={loading}>
+          {loading ? "…" : "Einloggen"}
+        </button>
+
+        <a className="btn secondary" href="/app">
+          Dashboard
+        </a>
+      </div>
+
+      {msg && (
+        <div style={{ marginTop: 10 }}>
+          <small style={{ color: "crimson" }}>{msg}</small>
+        </div>
+      )}
     </div>
   );
 }
