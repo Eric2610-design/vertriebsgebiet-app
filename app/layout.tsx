@@ -1,21 +1,21 @@
-import { redirect } from "next/navigation";
-import { createSupabaseServer } from "../../lib/supabase/server";
+import "./globals.css";
+
+export const metadata = {
+  title: "Vertriebsgebiet",
+  description: "Upload, Mapping und Duplikat-Vorschläge",
+};
 
 export const dynamic = "force-dynamic";
 
-export default async function AppLayout({
+export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = createSupabaseServer();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login?next=/app");
-  }
-
-  return <>{children}</>;
+  return (
+    <html lang="de">
+      <body>{children}</body>
+    </html>
+  );
 }
+
