@@ -56,6 +56,9 @@ export default function UploadWizard({
   const [candidates, setCandidates] = useState<any[]>([]);
   const [candidatesBusy, setCandidatesBusy] = useState(false);
 
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkOut, setBulkOut] = useState<string>("");
+
   useEffect(() => {
     if (analyze) {
       setSheetName(analyze.detectedSheetName);
@@ -63,6 +66,7 @@ export default function UploadWizard({
       setHeaders(analyze.headers);
       setImportResult(null);
       setCandidates([]);
+      setBulkOut("");
       setMapping(autoSuggestMapping(sourceTypeCode, analyze.headers));
     }
   }, [analyze, sourceTypeCode]);
@@ -133,6 +137,7 @@ export default function UploadWizard({
     setBusy(true);
     setMsg(null);
     setAnalyze(null);
+    setBulkOut("");
 
     try {
       const fd = new FormData();
@@ -156,6 +161,7 @@ export default function UploadWizard({
     setBusy(true);
     setMsg(null);
     setImportResult(null);
+    setBulkOut("");
 
     try {
       const res = await fetch("/api/import/commit", {
@@ -224,7 +230,7 @@ export default function UploadWizard({
       body: JSON.stringify({ candidateId: id }),
     });
     const j = await res.json();
-    if (!res.ok) setMsg(j?.error ?? "Accept fehlgeschlagen");
+    if (!res.ok) setMsg(j?.error ?? "Verknüpfen fehlgeschlagen");
     await loadCandidates();
   }
 
@@ -236,8 +242,34 @@ export default function UploadWizard({
       body: JSON.stringify({ candidateId: id }),
     });
     const j = await res.json();
-    if (!res.ok) setMsg(j?.error ?? "Reject fehlgeschlagen");
+    if (!res.ok) setMsg(j?.error ?? "Ablehnen fehlgeschlagen");
     await loadCandidates();
+  }
+
+  async function acceptAllCandidates() {
+    if (!candidates.length) return;
+    setBulkBusy(true);
+    setBulkOut("");
+    setMsg(null);
+
+    try {
+      const ids = candidates.map((c) => c.id);
+
+      const res = await fetch("/api/match/accept-bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidateIds: ids }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j?.error ?? "Bulk merge failed");
+
+      setBulkOut(`✅ Zusammengeführt: ${j.accepted}, Fehler: ${j.failed}`);
+      await loadCandidates();
+    } catch (e: any) {
+      setBulkOut(`❌ ${e?.message ?? "Bulk merge fehlgeschlagen"}`);
+    } finally {
+      setBulkBusy(false);
+    }
   }
 
   const canonicalFields: { key: keyof Mapping; label: string }[] = [
@@ -250,14 +282,13 @@ export default function UploadWizard({
     { key: "website", label: "Website" },
   ];
 
-  // Wenn Supabase im Browser nicht konfiguriert ist, lieber sauber anzeigen statt White-Screen.
   if (!supabase) {
     return (
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Konfiguration fehlt</h3>
         <p style={{ marginBottom: 0 }}>
           <small>
-            In Vercel fehlen <b>NEXT_PUBLIC_SUPABASE_URL</b> oder <b>NEXT_PUBLIC_SUPABASE_ANON_KEY</b> (häufig nur im Preview-Environment).
+            In Vercel fehlen <b>NEXT_PUBLIC_SUPABASE_URL</b> oder <b>NEXT_PUBLIC_SUPABASE_ANON_KEY</b>.
           </small>
         </p>
       </div>
@@ -314,6 +345,7 @@ export default function UploadWizard({
               setImportResult(null);
               setCandidates([]);
               setMsg(null);
+              setBulkOut("");
             }}
             disabled={busy}
           >
@@ -429,8 +461,27 @@ export default function UploadWizard({
       )}
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>3) Vorschläge: Händler zusammenführen</h3>
-        <small>Top 100 „suggested“ Matches für den Workspace.</small>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <h3 style={{ marginTop: 0 }}>3) Vorschläge: Händler zusammenführen</h3>
+            <small>Top 100 „suggested“ Matches für den Workspace.</small>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <button className="btn" onClick={acceptAllCandidates} disabled={bulkBusy || candidates.length === 0}>
+              {bulkBusy ? `Zusammenführen…` : `Alle zusammenführen (${candidates.length})`}
+            </button>
+            <button className="btn secondary" onClick={loadCandidates} disabled={candidatesBusy}>
+              {candidatesBusy ? "Lade…" : "Neu laden"}
+            </button>
+          </div>
+        </div>
+
+        {bulkOut && (
+          <p style={{ marginTop: 10, marginBottom: 0 }}>
+            <small>{bulkOut}</small>
+          </p>
+        )}
 
         <div style={{ marginTop: 12 }}>
           {candidates.length === 0 ? (
