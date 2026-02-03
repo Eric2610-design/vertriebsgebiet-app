@@ -1,95 +1,74 @@
-"use client";
+import { loginPassword, sendMagicLink } from "./actions";
 
-import { useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { createSupabaseBrowser } from "../../lib/supabase/browser";
-
-export default function LoginPage() {
-  const sp = useSearchParams();
-  const nextUrl = useMemo(() => sp.get("next") || "/app", [sp]);
-
-  const supabase = useMemo(() => createSupabaseBrowser(), []);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"password" | "magic">("password");
-  const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    setMsg(null);
-
-    try {
-      if (mode === "password") {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (error) throw error;
-
-        // HARTE Navigation -> Cookie ist sicher da, Server sieht User
-        window.location.assign(nextUrl);
-      } else {
-        const { error } = await supabase.auth.signInWithOtp({
-          email,
-          options: {
-            emailRedirectTo: `${window.location.origin}${nextUrl}`,
-          },
-        });
-        if (error) throw error;
-
-        setMsg("Magic-Link wurde gesendet. Bitte E-Mail öffnen.");
-      }
-    } catch (err: any) {
-      setMsg(err?.message || "Login fehlgeschlagen.");
-    } finally {
-      setLoading(false);
-    }
-  }
+export default function LoginPage({
+  searchParams,
+}: {
+  searchParams?: { next?: string; error?: string; sent?: string };
+}) {
+  const next = searchParams?.next || "/app";
+  const error = searchParams?.error;
+  const sent = searchParams?.sent === "1";
 
   return (
-    <div className="card">
-      <h2 style={{ marginTop: 0 }}>Login</h2>
+    <div className="mx-auto max-w-3xl p-6">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold">Login</h1>
+        <p className="text-sm text-gray-600">Bitte einloggen, um fortzufahren.</p>
+      </div>
 
-      <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
-        <div style={{ display: "grid", gap: 6 }}>
-          <label>E-Mail</label>
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="name@firma.de"
-            required
-          />
+      {error ? (
+        <div className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {error}
         </div>
+      ) : null}
 
-        {mode === "password" && (
-          <div style={{ display: "grid", gap: 6 }}>
-            <label>Passwort</label>
+      {sent ? (
+        <div className="mb-4 rounded border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+          Magic-Link wurde gesendet. Bitte Postfach prüfen.
+        </div>
+      ) : null}
+
+      <form className="rounded-lg border p-4">
+        <input type="hidden" name="next" value={next} />
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-sm font-medium">E-Mail</label>
             <input
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              type="password"
+              name="email"
+              type="email"
               required
+              className="w-full rounded border px-3 py-2"
+              placeholder="name@firma.de"
             />
           </div>
-        )}
 
-        <div style={{ display: "flex", gap: 10 }}>
-          <button className="btn primary" disabled={loading} type="submit">
-            {loading ? "…" : "Einloggen"}
+          <div>
+            <label className="mb-1 block text-sm font-medium">Passwort</label>
+            <input
+              name="password"
+              type="password"
+              className="w-full rounded border px-3 py-2"
+              placeholder="••••••••"
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            formAction={loginPassword}
+            className="rounded bg-black px-4 py-2 text-white"
+          >
+            Einloggen
           </button>
 
           <button
-            className="btn secondary"
-            type="button"
-            onClick={() => setMode(mode === "password" ? "magic" : "password")}
+            formAction={sendMagicLink}
+            className="rounded border px-4 py-2"
           >
-            Wechsel: {mode === "password" ? "Magic-Link" : "Passwort"}
+            Wechsel: Magic-Link
           </button>
         </div>
-
-        {msg && <p style={{ color: "crimson", margin: 0 }}>{msg}</p>}
       </form>
     </div>
   );
