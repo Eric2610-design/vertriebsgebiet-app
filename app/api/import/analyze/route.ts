@@ -4,6 +4,8 @@ import { createSupabaseServer } from "../../../../lib/supabase/server";
 import { createSupabaseAdmin } from "../../../../lib/supabase/admin";
 import crypto from "crypto";
 
+export const runtime = "nodejs";
+
 function sha256(buf: Buffer) {
   return crypto.createHash("sha256").update(buf).digest("hex");
 }
@@ -25,7 +27,9 @@ export async function POST(req: Request) {
   try {
     const supabase = createSupabaseServer();
     const { data: userData } = await supabase.auth.getUser();
-    if (!userData.user) return NextResponse.json({ error: "Nicht eingeloggt." }, { status: 401 });
+    if (!userData.user) {
+      return NextResponse.json({ error: "Nicht eingeloggt." }, { status: 401 });
+    }
 
     const form = await req.formData();
     const file = form.get("file") as File | null;
@@ -33,25 +37,49 @@ export async function POST(req: Request) {
     const sourceTypeCode = (form.get("sourceTypeCode") as string) || "";
 
     if (!file || !workspaceId || !sourceTypeCode) {
-      return NextResponse.json({ error: "file/workspaceId/sourceTypeCode fehlen." }, { status: 400 });
+      return NextResponse.json(
+        { error: "file/workspaceId/sourceTypeCode fehlen." },
+        { status: 400 }
+      );
     }
 
     const admin = createSupabaseAdmin();
+    const adb = admin.schema("app"); // <<< WICHTIG
 
-    const { data: mem, error: memErr } = await admin
+    // Membership check (app.workspace_members)
+    const { data: mem, error: memErr } = await adb
       .from("workspace_members")
       .select("workspace_id")
       .eq("workspace_id", workspaceId)
       .eq("user_id", userData.user.id)
       .maybeSingle();
-    if (memErr || !mem) return NextResponse.json({ error: "Kein Zugriff auf Workspace." }, { status: 403 });
 
-    const { data: st, error: stErr } = await admin
+    if (memErr) {
+      return NextResponse.json(
+        { error: `Workspace-Check fehlgeschlagen: ${memErr.message}` },
+        { status: 500 }
+      );
+    }
+    if (!mem) {
+      return NextResponse.json({ error: "Kein Zugriff auf Workspace." }, { status: 403 });
+    }
+
+    // Source type (app.source_types)
+    const { data: st, error: stErr } = await adb
       .from("source_types")
       .select("id, code")
       .eq("code", sourceTypeCode)
       .maybeSingle();
-    if (stErr || !st) return NextResponse.json({ error: "Unbekannte Quelle." }, { status: 400 });
+
+    if (stErr) {
+      return NextResponse.json(
+        { error: `SourceTypes-Check fehlgeschlagen: ${stErr.message}` },
+        { status: 500 }
+      );
+    }
+    if (!st) {
+      return NextResponse.json({ error: "Unbekannte Quelle." }, { status: 400 });
+    }
 
     const arrayBuffer = await file.arrayBuffer();
     const buf = Buffer.from(arrayBuffer);
@@ -62,12 +90,15 @@ export async function POST(req: Request) {
     const storagePath = `${workspaceId}/${sourceTypeCode}/${stamp}-${file.name}`;
 
     const up = await admin.storage.from("imports").upload(storagePath, buf, {
-      contentType: file.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      contentType:
+        file.type ||
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       upsert: false,
     });
     if (up.error) throw up.error;
 
-    const { data: run, error: runErr } = await admin
+    // import_runs in app schema
+    const { data: run, error: runErr } = await adb
       .from("import_runs")
       .insert({
         workspace_id: workspaceId,
