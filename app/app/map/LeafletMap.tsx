@@ -17,7 +17,7 @@ type MapRow = {
   sources: string[];
 };
 
-function dotIcon() {
+function markerIcon() {
   return L.divIcon({
     className: "",
     html: `<div class="marker-dot"></div>`,
@@ -48,7 +48,7 @@ function FitToPoints({ points }: { points: { lat: number; lng: number }[] }) {
 function ClusterLayer({ locations }: { locations: MapRow[] }) {
   const map = useMap();
   const [zoom, setZoom] = useState<number>(6);
-  const [bbox, setBbox] = useState<[number, number, number, number]>([5, 47, 16, 55]); // grob DE
+  const [bbox, setBbox] = useState<[number, number, number, number]>([5, 47, 16, 55]);
 
   useMapEvents({
     moveend() {
@@ -112,13 +112,18 @@ function ClusterLayer({ locations }: { locations: MapRow[] }) {
 
         const p = c.properties;
         return (
-          <Marker key={p.location_id} position={[lat, lng]} icon={dotIcon()}>
+          <Marker key={p.location_id} position={[lat, lng]} icon={markerIcon()}>
             <Popup>
               <div style={{ minWidth: 240 }}>
                 <div style={{ fontWeight: 800 }}>{p.dealer_name}</div>
                 <small>{[p.street, `${p.zipcode ?? ""} ${p.city ?? ""}`].filter(Boolean).join(", ")}</small>
                 <div style={{ marginTop: 8 }}>
                   <small>Quellen: {(p.sources ?? []).join(", ")}</small>
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <a className="btn secondary" href={`/app/dealers/${p.dealer_id}`}>
+                    Händler öffnen
+                  </a>
                 </div>
               </div>
             </Popup>
