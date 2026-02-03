@@ -1,11 +1,15 @@
-html, body {
-  margin: 0;
-  padding: 0;
+/* Leaflet + Tailwind Fix: sonst werden Tiles "zerfetzt" */
+.leaflet-container {
+  width: 100%;
   height: 100%;
-  font-family: system-ui, sans-serif;
 }
 
-a {
-  color: inherit;
-  text-decoration: none;
+.leaflet-container img {
+  max-width: none !important;
+  height: auto;
+}
+
+.leaflet-tile {
+  max-width: none !important;
+  max-height: none !important;
 }

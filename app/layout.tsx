@@ -1,20 +1,21 @@
 import "./globals.css";
-import Navbar from "@/components/Navbar";
 
 export const metadata = {
   title: "Vertriebsgebiet",
-  description: "Händlerkarte & Upload",
+  description: "Upload, Mapping und Duplikat-Vorschläge",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export const dynamic = "force-dynamic";
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="de">
-      <body>
-        <Navbar />
-        <main style={{ height: "calc(100vh - 56px)" }}>
-          {children}
-        </main>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
+
