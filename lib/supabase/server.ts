@@ -1,18 +1,30 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
-import { mustGetEnv } from "./env";
+
+function must(name: string) {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env var: ${name}`);
+  return v;
+}
 
 export function createSupabaseServer() {
   const cookieStore = cookies();
+
   return createServerClient(
-    mustGetEnv("NEXT_PUBLIC_SUPABASE_URL"),
-    mustGetEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+    must("NEXT_PUBLIC_SUPABASE_URL"),
+    must("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
     {
-      db: { schema: "app" },
+      db: { schema: "app" }, // <-- wichtig
       cookies: {
-        get(name) { return cookieStore.get(name)?.value; },
-        set(name, value, options) { cookieStore.set({ name, value, ...options }); },
-        remove(name, options) { cookieStore.set({ name, value: "", ...options }); },
+        get(name) {
+          return cookieStore.get(name)?.value;
+        },
+        set(name, value, options) {
+          cookieStore.set({ name, value, ...options });
+        },
+        remove(name, options) {
+          cookieStore.set({ name, value: "", ...options });
+        },
       },
     }
   );
