@@ -9,60 +9,117 @@ type Props = {
 };
 
 export default async function AppPage({ searchParams }: Props) {
-  // 1) Supabase "Basis"-Client (hat auth!)
-  const supabase = createSupabaseServer();
+  // Supabase Basis-Client (hat auth)
+  let supabase;
+  try {
+    supabase = createSupabaseServer();
+  } catch (e: any) {
+    return (
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>Dashboard</h2>
+        <p style={{ color: "crimson" }}>
+          Supabase Init Fehler: {e?.message ?? String(e)}
+        </p>
+      </div>
+    );
+  }
 
   const {
     data: { user },
     error: userErr,
   } = await supabase.auth.getUser();
 
-  // Wenn nicht eingeloggt → Login
+  if (userErr) {
+    return (
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>Dashboard</h2>
+        <p style={{ color: "crimson" }}>auth.getUser Fehler: {userErr.message}</p>
+      </div>
+    );
+  }
+
   if (!user) {
     const next = encodeURIComponent("/app" + (searchParams?.workspace ? `?workspace=${searchParams.workspace}` : ""));
     redirect(`/login?next=${next}`);
   }
 
-  // 2) DB Client im Schema "app" (hat KEIN auth)
+  // DB Client im Schema app (hat KEIN auth)
   const db = supabase.schema("app");
 
-  // Workspaces des Users
+  // 1) memberships -> workspace_ids
   const { data: memberships, error: mErr } = await db
     .from("workspace_members")
-    .select("workspace_id, workspaces(name)")
+    .select("workspace_id")
     .order("created_at", { ascending: true });
 
   if (mErr) {
     return (
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Dashboard</h2>
-        <p style={{ color: "crimson" }}>Fehler: workspace_members: {mErr.message}</p>
+        <p style={{ color: "crimson" }}>workspace_members Fehler: {mErr.message}</p>
       </div>
     );
   }
 
-  const workspaces =
-    (memberships ?? []).map((w: any) => ({
-      id: w.workspace_id as string,
-      name: w.workspaces?.name ?? (w.workspace_id as string),
-    })) ?? [];
+  const workspaceIds = (memberships ?? []).map((x: any) => x.workspace_id).filter(Boolean) as string[];
 
-  const workspaceId =
+  // 2) workspaces (Namen) nachladen
+  let workspaces: { id: string; name: string }[] = [];
+  if (workspaceIds.length > 0) {
+    const { data: ws, error: wsErr } = await db
+      .from("workspaces")
+      .select("id, name")
+      .in("id", workspaceIds);
+
+    if (wsErr) {
+      return (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Dashboard</h2>
+          <p style={{ color: "crimson" }}>workspaces Fehler: {wsErr.message}</p>
+        </div>
+      );
+    }
+
+    workspaces =
+      (ws ?? []).map((w: any) => ({
+        id: w.id as string,
+        name: w.name ?? (w.id as string),
+      })) ?? [];
+  }
+
+  const selectedWorkspaceId =
     (searchParams?.workspace && workspaces.find((w) => w.id === searchParams.workspace)?.id) ||
     workspaces[0]?.id ||
     "";
 
-  // Hersteller/Quellen
-  const { data: sourceTypes, error: sErr } = await db
-    .from("source_types")
-    .select("id, code, display_name, is_enabled")
-    .order("display_name", { ascending: true });
+  // 3) source_types laden (mit Fallback, falls is_enabled noch nicht existiert)
+  let sourceTypes: any[] = [];
+  let sourceTypesErr: any = null;
 
-  if (sErr) {
+  {
+    const res = await db
+      .from("source_types")
+      .select("id, code, display_name, is_enabled")
+      .order("display_name", { ascending: true });
+
+    sourceTypes = res.data ?? [];
+    sourceTypesErr = res.error;
+
+    if (sourceTypesErr && String(sourceTypesErr.message || "").toLowerCase().includes("is_enabled")) {
+      const res2 = await db
+        .from("source_types")
+        .select("id, code, display_name")
+        .order("display_name", { ascending: true });
+      sourceTypes = res2.data ?? [];
+      sourceTypesErr = res2.error;
+    }
+  }
+
+  if (sourceTypesErr) {
     return (
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Dashboard</h2>
-        <p style={{ color: "crimson" }}>Fehler: source_types: {sErr.message}</p>
+        <p style={{ color: "crimson" }}>source_types Fehler: {sourceTypesErr.message}</p>
       </div>
     );
   }
@@ -76,7 +133,7 @@ export default async function AppPage({ searchParams }: Props) {
         </div>
 
         <div style={{ display: "flex", gap: 10 }}>
-          <Link className="btn secondary" href={`/app/map${workspaceId ? `?workspace=${workspaceId}` : ""}`}>
+          <Link className="btn secondary" href={selectedWorkspaceId ? `/app/map?workspace=${selectedWorkspaceId}` : "/app/map"}>
             Karte
           </Link>
         </div>
@@ -86,29 +143,35 @@ export default async function AppPage({ searchParams }: Props) {
 
       <div style={{ display: "grid", gap: 16 }}>
         <div>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Workspace</div>
-          <form method="GET" action="/app" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <select
-              name="workspace"
-              defaultValue={workspaceId}
-              onChange={(e) => (e.currentTarget.form as HTMLFormElement)?.requestSubmit()}
-              style={{ minWidth: 260 }}
-            >
-              {workspaces.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                </option>
-              ))}
-            </select>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Workspaces</div>
 
-            <div style={{ fontSize: 13, opacity: 0.8 }}>
-              {workspaceId ? `ID: ${workspaceId}` : "Kein Workspace gefunden"}
+          {workspaces.length === 0 ? (
+            <div style={{ color: "crimson" }}>Kein Workspace gefunden.</div>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {workspaces.map((w) => (
+                <Link
+                  key={w.id}
+                  className="btn secondary"
+                  href={`/app?workspace=${w.id}`}
+                  style={{
+                    border: selectedWorkspaceId === w.id ? "2px solid #111" : undefined,
+                  }}
+                >
+                  {w.name}
+                </Link>
+              ))}
             </div>
-          </form>
+          )}
+
+          {selectedWorkspaceId ? (
+            <div style={{ marginTop: 8, fontSize: 12, opacity: 0.75 }}>Aktiv: {selectedWorkspaceId}</div>
+          ) : null}
         </div>
 
         <div>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Importierte Hersteller / Quellen</div>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Hersteller / Quellen</div>
+
           <div style={{ display: "grid", gap: 8 }}>
             {(sourceTypes ?? []).map((s: any) => (
               <div
@@ -129,14 +192,14 @@ export default async function AppPage({ searchParams }: Props) {
                 </div>
 
                 <div style={{ fontSize: 13, opacity: 0.9 }}>
-                  {s.is_enabled === false ? "deaktiviert" : "aktiv"}
+                  {"is_enabled" in s ? (s.is_enabled === false ? "deaktiviert" : "aktiv") : "aktiv"}
                 </div>
               </div>
             ))}
           </div>
 
           <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-            Entfernen/Reset pro Hersteller bauen wir als nächstes über deine SQL-Funktion <code>remove_source_type_data</code>.
+            Entfernen pro Hersteller bauen wir als nächstes über <code>remove_source_type_data</code>.
           </div>
         </div>
       </div>
