@@ -1,88 +1,90 @@
-import { NextResponse } from "next/server";
-import { createSupabaseServer } from "@/lib/supabase/server";
-import { createSupabaseAdmin } from "@/lib/supabase/admin";
-
+// app/api/dealers/[id]/route.ts
 export const dynamic = "force-dynamic";
 
-function slimError(e: any) {
-  if (!e) return null;
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
+// Standard: app-Schema. Fallback: public.
+const DEFAULT_SCHEMA = process.env.NEXT_PUBLIC_DB_SCHEMA || "app";
+
+function admin() {
+  if (!SUPABASE_URL || !SERVICE_KEY) {
+    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  }
+  return createClient(SUPABASE_URL, SERVICE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+function isUuid(v: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+}
+
+async function loadFromSchema(schema: string, id: string) {
+  const sb = admin().schema(schema);
+
+  const { data: dealer, error: dealerErr } = await sb
+    .from("dealers")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (dealerErr) return { ok: false as const, error: dealerErr };
+  if (!dealer) return { ok: false as const, error: { message: "dealer not found" } };
+
+  const { data: locations, error: locErr } = await sb
+    .from("locations")
+    .select("*")
+    .eq("dealer_id", id);
+
+  const { data: links, error: linkErr } = await sb
+    .from("links")
+    .select("*")
+    .eq("dealer_id", id);
+
   return {
-    message: e.message ?? String(e),
-    details: e.details ?? null,
-    hint: e.hint ?? null,
-    code: e.code ?? null,
+    ok: true as const,
+    dealer,
+    locations: locErr ? [] : (locations || []),
+    links: linkErr ? [] : (links || []),
   };
 }
 
-async function tryListByDealerId(admin: any, table: string, dealerId: string) {
-  // Wir versuchen dealer_id – wenn Tabelle/Spalte anders heißt, liefern wir [] statt 500.
-  const res = await admin.from(table).select("*").eq("dealer_id", dealerId);
-  if (res.error) return { data: [], error: slimError(res.error) };
-  return { data: res.data ?? [], error: null };
-}
+export async function GET(_req: Request, ctx: { params: { id: string } }) {
+  try {
+    const id = ctx?.params?.id;
 
-export async function GET(
-  _req: Request,
-  { params }: { params: { id: string } }
-) {
-  const id = params?.id;
+    if (!id || !isUuid(id)) {
+      return NextResponse.json(
+        { ok: false, error: "invalid dealer id" },
+        { status: 400 }
+      );
+    }
 
-  if (!id) {
+    // Erst im app-Schema versuchen, dann public als Fallback
+    const schemas = Array.from(new Set([DEFAULT_SCHEMA, "public"]));
+
+    let lastErr: any = null;
+
+    for (const schema of schemas) {
+      const res = await loadFromSchema(schema, id);
+      if (res.ok) {
+        return NextResponse.json({ ok: true, schema, ...res });
+      }
+      lastErr = res.error;
+    }
+
     return NextResponse.json(
-      { ok: false, error: "missing_id" },
-      { status: 400 }
+      { ok: false, error: "DB error loading dealer", details: lastErr },
+      { status: 500 }
     );
-  }
-
-  // Login prüfen (damit nicht jeder anonym alles abfragen kann)
-  const supabase = createSupabaseServer();
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
-
-  if (userErr || !user) {
+  } catch (e: any) {
     return NextResponse.json(
-      { ok: false, error: "not_authenticated" },
-      { status: 401 }
-    );
-  }
-
-  // Für Reads nehmen wir Admin, damit du nicht an RLS/Schema-Problemen stirbst.
-  const admin = createSupabaseAdmin();
-
-  // Dealer laden – WICHTIG: KEIN name_norm selektieren!
-  const dealerRes = await admin.from("dealers").select("*").eq("id", id).maybeSingle();
-
-  if (dealerRes.error) {
-    return NextResponse.json(
-      { ok: false, error: "DB error loading dealer", extra: slimError(dealerRes.error) },
+      { ok: false, error: e?.message || String(e) },
       { status: 500 }
     );
   }
-
-  if (!dealerRes.data) {
-    return NextResponse.json(
-      { ok: false, error: "not_found" },
-      { status: 404 }
-    );
-  }
-
-  // Optional: related Daten (wenn Tabellen existieren)
-  const [locationsRes, linksRes] = await Promise.all([
-    tryListByDealerId(admin, "locations", id),
-    tryListByDealerId(admin, "links", id),
-  ]);
-
-  // Notes: falls du ein notes-table/endpoint hast, kannst du es später separat lösen.
-  return NextResponse.json({
-    ok: true,
-    dealer: dealerRes.data,
-    locations: locationsRes.data,
-    links: linksRes.data,
-    warnings: {
-      locations: locationsRes.error,
-      links: linksRes.error,
-    },
-  });
 }
