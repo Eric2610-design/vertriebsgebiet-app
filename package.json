@@ -17,9 +17,10 @@
     "react-dom": "^18.3.1",
     "xlsx": "^0.18.5",
     "zod": "^3.23.8",
-    "leaflet": "^1.9.4",
+   "leaflet": "^1.9.4",
 "react-leaflet": "^4.2.1",
 "supercluster": "^8.0.1"
+
 
   },
   "devDependencies": {
