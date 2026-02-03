@@ -1,212 +1,176 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { useParams } from "next/navigation";
 
-type ApiPayload = {
-  ok: boolean;
-  error?: string;
-  extra?: any;
-  dealer?: Record<string, any>;
-  locations?: any[];
-  links?: any[];
-  warnings?: any;
-};
+type AnyObj = Record<string, any>;
 
-function firstNonEmpty(obj: any, keys: string[]) {
-  for (const k of keys) {
-    const v = obj?.[k];
-    if (v !== undefined && v !== null && String(v).trim() !== "") return v;
-  }
-  return "";
+function isUuid(v: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
 
-function toMapsUrl(dealer: any, loc?: any) {
-  const lat = firstNonEmpty(loc, ["lat", "lng", "latitude", "longitude"]);
-  const lng = firstNonEmpty(loc, ["lng", "lon", "longitude"]);
-  if (lat && lng) return `https://www.google.com/maps?q=${lat},${lng}`;
+export default function DealerClient(props: { id?: string }) {
+  const params = useParams();
 
-  const street = firstNonEmpty(dealer, ["street", "address", "address1", "street1"]);
-  const zip = firstNonEmpty(dealer, ["zip", "zipcode", "postal_code"]);
-  const city = firstNonEmpty(dealer, ["city", "town"]);
-  const country = firstNonEmpty(dealer, ["country"]);
-  const q = [street, zip, city, country].filter(Boolean).join(", ");
-  if (q) return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
-  return "";
-}
+  const routeId = useMemo(() => {
+    const p: any = params || {};
+    const raw = p.id;
+    if (typeof raw === "string") return raw;
+    if (Array.isArray(raw) && typeof raw[0] === "string") return raw[0];
+    return undefined;
+  }, [params]);
 
-export default function DealerClient({ id }: { id: string }) {
+  const dealerId = props.id ?? routeId;
+
   const [loading, setLoading] = useState(true);
-  const [payload, setPayload] = useState<ApiPayload | null>(null);
-  const [rawError, setRawError] = useState<string>("");
+  const [err, setErr] = useState<string | null>(null);
+  const [dealer, setDealer] = useState<AnyObj | null>(null);
+  const [locations, setLocations] = useState<AnyObj[]>([]);
 
   async function load() {
+    setErr(null);
+
+    if (!dealerId) {
+      setLoading(false);
+      setErr("Keine Händler-ID in der URL gefunden (id ist undefined).");
+      return;
+    }
+    if (!isUuid(dealerId)) {
+      setLoading(false);
+      setErr(`Ungültige Händler-ID (keine UUID): "${dealerId}"`);
+      return;
+    }
+
     setLoading(true);
-    setRawError("");
     try {
-      const res = await fetch(`/api/dealers/${id}`, { cache: "no-store" });
+      // WICHTIG: führender Slash, sonst wird relativ gefetcht -> HTML-404
+      const res = await fetch(`/api/dealers/${encodeURIComponent(dealerId)}`, {
+        cache: "no-store",
+      });
 
       const ct = res.headers.get("content-type") || "";
-      if (!ct.includes("application/json")) {
-        const txt = await res.text();
-        setRawError(
-          `API hat kein JSON geliefert (Status ${res.status}). Das ist fast immer ein Routing/404/HTML-Problem.\n\n` +
-            txt.slice(0, 1200)
-        );
-        setPayload(null);
-        setLoading(false);
-        return;
+      if (!res.ok) {
+        const body = ct.includes("application/json") ? await res.json() : await res.text();
+        const msg =
+          typeof body === "string"
+            ? body.slice(0, 800)
+            : body?.error || body?.message || JSON.stringify(body).slice(0, 800);
+        throw new Error(`API Fehler (${res.status}): ${msg}`);
       }
 
-      const json = (await res.json()) as ApiPayload;
-      setPayload(json);
+      const data = ct.includes("application/json") ? await res.json() : null;
+      const d = (data?.dealer ?? data?.data ?? data) as AnyObj | null;
+      const loc = (data?.locations ?? d?.locations ?? []) as AnyObj[];
 
-      if (!res.ok || !json.ok) {
-        setRawError(
-          `API Fehler (Status ${res.status}): ${json.error ?? "unbekannt"}\n` +
-            (json.extra ? `\nDetails: ${JSON.stringify(json.extra)}` : "")
-        );
-      }
-    } catch (e: any) {
-      setRawError(e?.message ?? String(e));
-      setPayload(null);
-    } finally {
+      setDealer(d);
+      setLocations(Array.isArray(loc) ? loc : []);
       setLoading(false);
+    } catch (e: any) {
+      setLoading(false);
+      setErr(e?.message || String(e));
     }
   }
 
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [dealerId]);
 
-  const dealer = payload?.dealer ?? {};
-  const locations = payload?.locations ?? [];
-  const links = payload?.links ?? [];
+  const title =
+    dealer?.name ||
+    dealer?.canonical_name ||
+    dealer?.company ||
+    dealer?.firm ||
+    "(ohne Name)";
 
-  const name = useMemo(() => {
-    return (
-      firstNonEmpty(dealer, ["name", "dealer_name", "company", "firma"]) ||
-      "(ohne Name)"
-    );
-  }, [dealer]);
+  const primaryLoc = locations.find((l) => l?.is_primary) || locations[0] || null;
 
-  const street = firstNonEmpty(dealer, ["street", "address", "address1", "street1"]);
-  const zip = firstNonEmpty(dealer, ["zip", "zipcode", "postal_code"]);
-  const city = firstNonEmpty(dealer, ["city", "town"]);
-  const country = firstNonEmpty(dealer, ["country"]);
-  const phone = firstNonEmpty(dealer, ["phone", "telephone", "tel"]);
-  const email = firstNonEmpty(dealer, ["email", "mail"]);
-  const web = firstNonEmpty(dealer, ["website", "web", "url", "homepage"]);
+  const street = dealer?.street || primaryLoc?.street || "";
+  const zipcode = dealer?.zipcode || primaryLoc?.zipcode || "";
+  const city = dealer?.city || primaryLoc?.city || "";
+  const country = dealer?.country || primaryLoc?.country || "";
 
-  const mapsUrl = toMapsUrl(dealer, locations[0]);
+  const phone = dealer?.phone || dealer?.phonenumber || primaryLoc?.phone || "";
+  const email = dealer?.email || primaryLoc?.email || "";
+  const website = dealer?.website || primaryLoc?.website || "";
 
   return (
     <div className="card">
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h2 style={{ marginTop: 0 }}>{name}</h2>
-          <div style={{ opacity: 0.75, fontSize: 13 }}>ID: {id}</div>
+          <h2 style={{ marginTop: 0 }}>{title}</h2>
+          <div style={{ opacity: 0.75, fontSize: 13 }}>ID: {dealerId || "-"}</div>
         </div>
 
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-          <Link className="btn secondary" href="/app/map">
-            Zur Karte
-          </Link>
-          <Link className="btn secondary" href="/app">
-            Dashboard
-          </Link>
+        <div style={{ display: "flex", gap: 8 }}>
+          <a className="btn secondary" href="/app/map">Zur Karte</a>
+          <a className="btn secondary" href="/app">Dashboard</a>
         </div>
       </div>
 
-      {loading && <p style={{ marginTop: 16 }}>Lade Händlerdaten…</p>}
+      <div style={{ marginTop: 14 }}>
+        {loading && <div>Lade Händler…</div>}
 
-      {!loading && rawError && (
-        <div style={{ marginTop: 16, color: "#b00020", whiteSpace: "pre-wrap" }}>
-          <b>Fehler:</b> {rawError}
-          <div style={{ marginTop: 10 }}>
-            <button className="btn" onClick={load}>Neu laden</button>
-          </div>
-        </div>
-      )}
-
-      {!loading && !rawError && payload?.ok && (
-        <>
-          <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div className="card">
-              <h3 style={{ marginTop: 0 }}>Adresse</h3>
-              <div>{street}</div>
-              <div>{[zip, city].filter(Boolean).join(" ")}</div>
-              <div>{country}</div>
-
-              {mapsUrl && (
-                <div style={{ marginTop: 10 }}>
-                  <a className="btn secondary" href={mapsUrl} target="_blank" rel="noreferrer">
-                    In Google Maps öffnen
-                  </a>
-                </div>
-              )}
+        {!loading && err && (
+          <div style={{ color: "#b00020", whiteSpace: "pre-wrap" }}>
+            <b>Fehler:</b> {err}
+            <div style={{ marginTop: 10 }}>
+              <button className="btn" onClick={load}>Neu laden</button>
             </div>
+          </div>
+        )}
 
-            <div className="card">
-              <h3 style={{ marginTop: 0 }}>Kontakt</h3>
-              {phone ? <div>☎️ {phone}</div> : <div style={{ opacity: 0.7 }}>Telefon: –</div>}
-              {email ? (
+        {!loading && !err && (
+          <>
+            <div className="card" style={{ marginTop: 12 }}>
+              <h3 style={{ marginTop: 0 }}>Stammdaten</h3>
+
+              <div style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 8 }}>
+                <div style={{ opacity: 0.7 }}>Adresse</div>
                 <div>
-                  ✉️ <a href={`mailto:${email}`}>{email}</a>
+                  {[street, [zipcode, city].filter(Boolean).join(" "), country].filter(Boolean).join(", ") || "-"}
                 </div>
+
+                <div style={{ opacity: 0.7 }}>Telefon</div>
+                <div>{phone || "-"}</div>
+
+                <div style={{ opacity: 0.7 }}>E-Mail</div>
+                <div>{email || "-"}</div>
+
+                <div style={{ opacity: 0.7 }}>Webseite</div>
+                <div>{website || "-"}</div>
+              </div>
+            </div>
+
+            <div className="card" style={{ marginTop: 12 }}>
+              <h3 style={{ marginTop: 0 }}>Standorte ({locations.length})</h3>
+
+              {locations.length === 0 ? (
+                <div style={{ opacity: 0.8 }}>Keine Standorte vorhanden.</div>
               ) : (
-                <div style={{ opacity: 0.7 }}>E-Mail: –</div>
-              )}
-              {web ? (
-                <div>
-                  🌐{" "}
-                  <a href={web.startsWith("http") ? web : `https://${web}`} target="_blank" rel="noreferrer">
-                    {web}
-                  </a>
+                <div style={{ display: "grid", gap: 10 }}>
+                  {locations.map((l, idx) => {
+                    const line1 = [l.street].filter(Boolean).join(" ");
+                    const line2 = [[l.zipcode, l.city].filter(Boolean).join(" "), l.country].filter(Boolean).join(", ");
+                    const label = l.label || (l.is_primary ? "Hauptstandort" : `Standort ${idx + 1}`);
+                    return (
+                      <div key={l.id || idx} className="card" style={{ margin: 0 }}>
+                        <div style={{ fontWeight: 600 }}>{label}{l.is_primary ? " ⭐" : ""}</div>
+                        <div style={{ opacity: 0.85 }}>
+                          {[line1, line2].filter(Boolean).join(" · ") || "-"}
+                        </div>
+                        <div style={{ opacity: 0.8, fontSize: 13, marginTop: 4 }}>
+                          {[l.phone || "", l.email || "", l.website || ""].filter(Boolean).join(" · ") || ""}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              ) : (
-                <div style={{ opacity: 0.7 }}>Webseite: –</div>
               )}
             </div>
-          </div>
-
-          <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div className="card">
-              <h3 style={{ marginTop: 0 }}>Standorte</h3>
-              <div style={{ opacity: 0.8 }}>
-                {locations.length} Datensätze gefunden
-              </div>
-              {locations.length > 0 && (
-                <pre style={{ marginTop: 10, fontSize: 12, overflowX: "auto" }}>
-{JSON.stringify(locations.slice(0, 5), null, 2)}
-                </pre>
-              )}
-            </div>
-
-            <div className="card">
-              <h3 style={{ marginTop: 0 }}>Quellen / Links</h3>
-              <div style={{ opacity: 0.8 }}>
-                {links.length} Datensätze gefunden
-              </div>
-              {links.length > 0 && (
-                <pre style={{ marginTop: 10, fontSize: 12, overflowX: "auto" }}>
-{JSON.stringify(links.slice(0, 8), null, 2)}
-                </pre>
-              )}
-            </div>
-          </div>
-
-          {payload?.warnings && (payload.warnings.locations || payload.warnings.links) && (
-            <div style={{ marginTop: 12, opacity: 0.8, fontSize: 12 }}>
-              <b>Hinweis:</b> Falls hier Warnings stehen, existieren evtl. Tabellen/Spalten noch nicht exakt so – dann sag mir kurz die Spaltennamen in Supabase, dann passen wir’s an.
-              <pre style={{ marginTop: 8, fontSize: 12, overflowX: "auto" }}>
-{JSON.stringify(payload.warnings, null, 2)}
-              </pre>
-            </div>
-          )}
-        </>
-      )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
