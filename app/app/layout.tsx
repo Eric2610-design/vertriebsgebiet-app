@@ -1,3 +1,5 @@
+import "leaflet/dist/leaflet.css";
+
 import { redirect } from "next/navigation";
 import { createSupabaseServer } from "../../lib/supabase/server";
 
@@ -19,3 +21,4 @@ export default async function AppLayout({
 
   return <>{children}</>;
 }
+
