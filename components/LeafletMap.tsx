@@ -1,5 +1,6 @@
 "use client";
 
+import { dealers } from "../lib/dealers";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import Link from "next/link";
 import "leaflet/dist/leaflet.css";
@@ -16,23 +17,7 @@ L.Icon.Default.mergeOptions({
     "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
 
-// Lokale Testdaten
-const dealers = [
-  {
-    id: 1,
-    name: "Test-Händler Frankfurt",
-    lat: 50.11,
-    lng: 8.68,
-    city: "Frankfurt am Main",
-  },
-  {
-    id: 2,
-    name: "Test-Händler Berlin",
-    lat: 52.52,
-    lng: 13.405,
-    city: "Berlin",
-  },
-];
+
 
 export default function LeafletMap() {
   return (
