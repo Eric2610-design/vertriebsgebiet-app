@@ -20,6 +20,9 @@ export async function GET(req: Request) {
       ? sourceParam.split(",").map((s) => s.trim()).filter(Boolean)
       : [];
 
+    const uploadRunIdRaw = (searchParams.get("uploadRunId") ?? "").trim();
+    const uploadRunId = uploadRunIdRaw ? Number(uploadRunIdRaw) : NaN;
+
     const limit = Math.min(Number(searchParams.get("limit") ?? "2000"), 20000);
 
     const sb = supabaseServer();
@@ -27,7 +30,7 @@ export async function GET(req: Request) {
     let query = sb
       .from("dealers")
       .select(
-        "id,name,street,zipcode,postal_code,city,country,email,phone,website,source,lat,lng,is_master,duplicate_of,notes,geocode_status",
+        "id,name,street,zipcode,postal_code,city,country,email,phone,website,source,upload_run_id,lat,lng,is_master,duplicate_of,notes,geocode_status",
         { count: "exact" }
       )
       .limit(limit)
@@ -41,6 +44,10 @@ export async function GET(req: Request) {
       query = query.not("lat", "is", null).not("lng", "is", null);
     }
 
+
+    if (Number.isFinite(uploadRunId) && uploadRunId > 0) {
+      query = query.eq("upload_run_id", uploadRunId);
+    }
     if (sources.length === 1) {
       query = query.eq("source", sources[0]);
     } else if (sources.length > 1) {

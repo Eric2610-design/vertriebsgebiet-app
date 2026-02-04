@@ -33,6 +33,7 @@ export default function DuplicateReview() {
   const [err, setErr] = useState<string>("");
   const [q, setQ] = useState("");
   const [source, setSource] = useState("");
+  const [runId, setRunId] = useState<number | null>(null);
   const [onlyUnresolved, setOnlyUnresolved] = useState(true);
   const [msg, setMsg] = useState<string>("");
 
@@ -43,6 +44,7 @@ export default function DuplicateReview() {
       const params = new URLSearchParams();
       if (q.trim()) params.set("q", q.trim());
       if (source.trim()) params.set("source", source.trim());
+      if (runId) params.set("uploadRunId", String(runId));
       params.set("withGeo", "0");
       params.set("limit", "20000");
 
@@ -60,7 +62,16 @@ export default function DuplicateReview() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, source]);
+  }, [q, source, runId]);
+
+  useEffect(() => {
+    // optional filter: /admin/dealers?runId=123
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const v = sp.get("runId");
+    const id = v ? Number(v) : NaN;
+    if (Number.isFinite(id) && id > 0) setRunId(id);
+  }, []);
 
   const groups = useMemo(() => {
     const map = new Map<string, Dealer[]>();
@@ -136,6 +147,24 @@ export default function DuplicateReview() {
           </div>
           <div className="row">
             <Link className="pill" href="/">← Zur Karte</Link>
+            {runId ? (
+              <span className="badge">Upload-Run: #{runId}</span>
+            ) : null}
+            {runId ? (
+              <button
+                className="pill"
+                onClick={() => {
+                  setRunId(null);
+                  if (typeof window !== "undefined") {
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete("runId");
+                    window.history.replaceState({}, "", url.toString());
+                  }
+                }}
+              >
+                Filter entfernen
+              </button>
+            ) : null}
             <span className="badge">Gruppen: {groups.length}</span>
             {loading ? <span className="badge">Lade …</span> : null}
           </div>

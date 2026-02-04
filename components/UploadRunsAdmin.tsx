@@ -195,9 +195,17 @@ export default function UploadRunsAdmin() {
                       </td>
                       <td style={{ maxWidth: 360, whiteSpace: "pre-wrap" }}>{r.notes ?? ""}</td>
                       <td style={{ textAlign: "right" }}>
-                        <button className="btnDanger" onClick={() => deleteRun(r.id)}>
-                          Run löschen
-                        </button>
+                        <div className="row" style={{ justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                          <Link className="pill" href={`/admin/dealers?runId=${r.id}`} title="Dubletten nur für diesen Upload ansehen">
+                            Dubletten
+                          </Link>
+                          <Link className="pill" href={`/upload?reimport=${r.id}`} title="Rollback dieses Runs + neu importieren">
+                            Rollback+Reimport
+                          </Link>
+                          <button className="btnDanger" onClick={() => deleteRun(r.id)}>
+                            Run löschen
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
