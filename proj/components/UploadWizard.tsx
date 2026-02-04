@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import * as XLSX from "xlsx";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
-import { norm } from "@/lib/dealerUtils";
+import { norm, normStreet } from "@/lib/dealerUtils";
 
 type Mapping = {
   name: string;
