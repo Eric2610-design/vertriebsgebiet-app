@@ -4,147 +4,129 @@ import { useState } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabaseClient";
 
-type RowObj = Record<string, any>;
+type Row = Record<string, any>;
 
-type ImportResult = {
-  inserted: number;
-  batches: number;
+type Mapping = {
+  name?: string;
+  city?: string;
+  street?: string;
 };
 
-function getFirst<T = any>(obj: RowObj, keys: string[]): T | null {
-  for (const k of keys) {
-    if (obj[k] !== undefined && obj[k] !== null && String(obj[k]).trim() !== "") return obj[k] as T;
-  }
-  return null;
-}
-
-function normString(v: any): string | null {
-  if (v === undefined || v === null) return null;
-  const s = String(v).trim();
-  return s.length ? s : null;
-}
-
-async function insertInBatches(rows: any[], batchSize = 500): Promise<ImportResult> {
-  let inserted = 0;
-  let batches = 0;
-
-  for (let i = 0; i < rows.length; i += batchSize) {
-    const chunk = rows.slice(i, i + batchSize);
-    batches += 1;
-
-    const { error } = await supabase.from("dealers").insert(chunk);
-    if (error) throw error;
-
-    inserted += chunk.length;
-  }
-
-  return { inserted, batches };
-}
-
 export default function DealerUpload() {
-  const [status, setStatus] = useState<string>("Wähle eine Excel-Datei aus…");
+  const [rows, setRows] = useState<Row[]>([]);
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [mapping, setMapping] = useState<Mapping>({});
+  const [status, setStatus] = useState<string>("Bitte Excel-Datei auswählen");
   const [busy, setBusy] = useState(false);
-  const [last, setLast] = useState<ImportResult | null>(null);
 
+  /* ===============================
+     1️⃣ Datei einlesen
+     =============================== */
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setStatus("Lese Datei …");
     setBusy(true);
-    setLast(null);
-    setStatus(`Lese Datei: ${file.name} …`);
 
-    try {
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: "array" });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rawRows: RowObj[] = XLSX.utils.sheet_to_json(sheet, { defval: null });
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array" });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const data: Row[] = XLSX.utils.sheet_to_json(sheet, { defval: null });
 
-      if (!rawRows.length) {
-        setStatus("Keine Zeilen gefunden (Sheet leer oder Header nicht erkannt).");
-        setBusy(false);
-        return;
-      }
-
-      // Mapping (best-effort): wir versuchen viele typische Spaltennamen
-      // -> Zielspalten in Supabase: name, city, street, source, created_at
-      const mapped = rawRows
-        .map((r) => {
-          const name = normString(
-            getFirst(r, ["Name", "Händler", "Haendler", "Dealer", "Firma", "Unternehmen", "Shop"])
-          );
-
-          const city = normString(
-            getFirst(r, ["Ort", "Stadt", "City", "Town"])
-          );
-
-          const street = normString(
-            getFirst(r, ["Straße", "Strasse", "Street", "Adresse", "Address"])
-          );
-
-          // optional: Quelle/Datei
-          const source = file.name;
-
-          return { name, city, street, source };
-        })
-        // nur Zeilen mit Name behalten
-        .filter((x) => x.name);
-
-      if (!mapped.length) {
-        setStatus(
-          "Es wurden keine gültigen Händler erkannt (kein Name gefunden). Prüfe, ob die Spalten z. B. „Name“ / „Händler“ enthalten."
-        );
-        setBusy(false);
-        return;
-      }
-
-      setStatus(`Importiere ${mapped.length} Händler nach Supabase …`);
-
-      const res = await insertInBatches(mapped, 500);
-      setLast(res);
-      setStatus(`✅ Import fertig: ${res.inserted} Händler gespeichert (${res.batches} Batch(es)).`);
-    } catch (err: any) {
-      console.error(err);
-      setStatus(`❌ Fehler beim Import: ${err?.message ?? String(err)}`);
-    } finally {
+    if (!data.length) {
+      setStatus("❌ Datei enthält keine Daten");
       setBusy(false);
-      // Reset input (damit gleiche Datei nochmal gewählt werden kann)
-      e.target.value = "";
+      return;
     }
+
+    setRows(data);
+    setHeaders(Object.keys(data[0]));
+    setStatus("Spalten erkannt – bitte Mapping wählen");
+    setBusy(false);
   }
 
+  /* ===============================
+     2️⃣ Import starten
+     =============================== */
+  async function startImport() {
+    if (!mapping.name) {
+      alert("Bitte eine Spalte für den Händlernamen auswählen.");
+      return;
+    }
+
+    setBusy(true);
+    setStatus("Importiere Händler …");
+
+    const payload = rows
+      .map((r) => ({
+        name: String(r[mapping.name!]).trim(),
+        city: mapping.city ? String(r[mapping.city]).trim() : null,
+        street: mapping.street ? String(r[mapping.street]).trim() : null,
+        source: "upload",
+      }))
+      .filter((r) => r.name);
+
+    const { error } = await supabase.from("dealers").insert(payload);
+
+    if (error) {
+      setStatus(`❌ Fehler: ${error.message}`);
+    } else {
+      setStatus(`✅ Import erfolgreich: ${payload.length} Händler`);
+    }
+
+    setBusy(false);
+  }
+
+  /* ===============================
+     UI
+     =============================== */
   return (
-    <main style={{ padding: 40, maxWidth: 900 }}>
-      <h1>Upload → Supabase</h1>
+    <main style={{ padding: 40, maxWidth: 800 }}>
+      <h1>Händler-Upload</h1>
 
-      <div style={{ marginTop: 16, padding: 16, border: "1px solid #ddd", borderRadius: 8 }}>
-        <p style={{ marginTop: 0 }}>
-          Wähle deine Excel-Datei (.xlsx). Danach wird automatisch importiert.
-        </p>
+      <input
+        type="file"
+        accept=".xlsx,.xls"
+        onChange={handleFile}
+        disabled={busy}
+      />
 
-        <input
-          type="file"
-          accept=".xlsx,.xls"
-          onChange={handleFile}
-          disabled={busy}
-        />
+      <p style={{ marginTop: 12 }}>{status}</p>
 
-        <div style={{ marginTop: 12 }}>
-          <strong>Status:</strong>
-          <div style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{status}</div>
+      {headers.length > 0 && (
+        <div style={{ marginTop: 24 }}>
+          <h3>Spalten zuordnen</h3>
+
+          {[
+            { key: "name", label: "Händlername (Pflichtfeld)" },
+            { key: "city", label: "Stadt" },
+            { key: "street", label: "Straße" },
+          ].map((f) => (
+            <div key={f.key} style={{ marginBottom: 12 }}>
+              <label>{f.label}</label>
+              <br />
+              <select
+                value={(mapping as any)[f.key] ?? ""}
+                onChange={(e) =>
+                  setMapping({ ...mapping, [f.key]: e.target.value || undefined })
+                }
+              >
+                <option value="">— nicht zuordnen —</option>
+                {headers.map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+
+          <button onClick={startImport} disabled={busy}>
+            Import starten
+          </button>
         </div>
-
-        {last && (
-          <div style={{ marginTop: 12 }}>
-            <a href="/admin/dealers">→ Zur Händlerliste (Admin)</a>
-          </div>
-        )}
-      </div>
-
-      <p style={{ marginTop: 16, opacity: 0.8 }}>
-        Hinweis: Das Mapping ist „best effort“. Wenn deine Spalten anders heißen, passe ich dir die Schlüssel in
-        <code style={{ padding: "0 6px" }}>DealerUpload.tsx</code> exakt an.
-      </p>
+      )}
     </main>
   );
 }
