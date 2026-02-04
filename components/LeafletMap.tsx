@@ -22,4 +22,27 @@ export default function LeafletMap() {
       zoom={6}
       style={{ height: "100%", width: "100%" }}
     >
-      <Til
+      <TileLayer
+        attribution="© OpenStreetMap"
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+
+      {/* Test-Marker */}
+      <Marker position={[50.11, 8.68]}>
+        <Popup>
+          <strong>Test-Händler</strong>
+          <br />
+          Frankfurt am Main
+        </Popup>
+      </Marker>
+
+      <Marker position={[52.52, 13.405]}>
+        <Popup>
+          <strong>Zweiter Händler</strong>
+          <br />
+          Berlin
+        </Popup>
+      </Marker>
+    </MapContainer>
+  );
+}
