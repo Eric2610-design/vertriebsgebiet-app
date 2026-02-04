@@ -1,54 +1,53 @@
-"use client";
+import Link from "next/link";
+import MapClient from "@/components/MapClient";
+import { createSupabaseServer } from "@/lib/supabase/server";
 
-import { useState } from "react";
-import LeafletMap from "@/components/LeafletMap";
+export const dynamic = "force-dynamic";
 
-export default function HomePage() {
-  const [msg, setMsg] = useState<string>("");
+export default async function HomePage() {
+  const supabase = createSupabaseServer();
 
-  async function geocodeMissing() {
-    setMsg("Starte Geocoding (fehlende Koordinaten)…");
-    try {
-      const res = await fetch("/api/geocode", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ limit: 50, onlyMissing: true }),
-      });
-      const json = await res.json();
-      if (!json.ok) {
-        setMsg(`❌ ${json.error ?? "Fehler"}`);
-        return;
-      }
-      setMsg(`✅ Geocoding fertig: processed=${json.processed}, success=${json.success}, failed=${json.failed}. Seite neu laden für neue Marker.`);
-    } catch (e: any) {
-      setMsg(`❌ ${e?.message ?? String(e)}`);
-    }
+  // Nur Händler mit Geo laden
+  const { data: dealers, error } = await supabase
+    .from("dealers")
+    .select("id,name,street,zipcode,city,country,lat,lng,source")
+    .not("lat", "is", null)
+    .not("lng", "is", null)
+    .limit(20000);
+
+  if (error) {
+    return (
+      <main style={{ padding: 24 }}>
+        <h1>Händlerkarte</h1>
+        <p style={{ color: "crimson" }}>
+          Fehler beim Laden aus Supabase: {error.message}
+        </p>
+        <p>
+          <Link href="/upload">→ Upload</Link> ·{" "}
+          <Link href="/admin/dealers">→ Dublettenkontrolle</Link>
+        </p>
+      </main>
+    );
   }
 
   return (
     <main style={{ padding: 24 }}>
-      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
         <h1 style={{ margin: 0 }}>Händlerkarte</h1>
-        <button onClick={geocodeMissing} style={{ padding: "8px 12px", cursor: "pointer" }}>
-          Fehlende Adressen geocoden (50)
-        </button>
-        <a href="/admin/dealers" style={{ opacity: 0.8 }}>→ Dublettenkontrolle</a>
-        <a href="/upload" style={{ opacity: 0.8 }}>→ Upload</a>
+        <nav style={{ display: "flex", gap: 12 }}>
+          <Link href="/admin/dealers">→ Dublettenkontrolle</Link>
+          <Link href="/upload">→ Upload</Link>
+        </nav>
       </div>
-
-      {msg && (
-        <div style={{ marginTop: 12, padding: 10, border: "1px solid #ddd", borderRadius: 8 }}>
-          {msg}
-        </div>
-      )}
 
       <div style={{ marginTop: 16 }}>
-        <LeafletMap />
+        <MapClient dealers={dealers ?? []} />
       </div>
 
-      <p style={{ marginTop: 10, opacity: 0.7 }}>
-        Hinweis: Nominatim (OSM) ist rate-limited. Für viele Händler den Button mehrfach drücken.
-      </p>
+      <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+        Hinweis: OpenStreetMap ist rate-limited. Bei sehr vielen Händlern ggf.
+        clustern/später optimieren.
+      </div>
     </main>
   );
 }
