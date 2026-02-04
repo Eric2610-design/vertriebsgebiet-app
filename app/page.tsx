@@ -1,8 +1,14 @@
+import dynamic from "next/dynamic";
+
+const LeafletMap = dynamic(
+  () => import("../components/LeafletMap"),
+  { ssr: false }
+);
+
 export default function Page() {
   return (
-    <main style={{ padding: 40 }}>
-      <h1>UI RECOVERED ✅</h1>
-      <p>Plan B erfolgreich – App Router läuft stabil.</p>
-    </main>
+    <div style={{ height: "100vh", width: "100vw" }}>
+      <LeafletMap />
+    </div>
   );
 }
