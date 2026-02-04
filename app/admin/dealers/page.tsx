@@ -60,14 +60,22 @@ export default function DealersAdminPage() {
   if (loading) return <p>Lade Dubletten …</p>;
 
   // 🔹 Gruppieren nach Name + Stadt
-  const groups = Object.values(
-    dealers.reduce((acc: any, d) => {
-      const key = `${d.name?.toLowerCase()}|${d.city?.toLowerCase()}`;
-      acc[key] ??= [];
-      acc[key].push(d);
-      return acc;
-    }, {})
-  ).filter((g: Dealer[]) => g.length > 1); // nur echte Dubletten
+  function norm(v?: string | null) {
+  return (v ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+const groups = Object.values(
+  dealers.reduce((acc: any, d) => {
+    const key = `${norm(d.name)}|${norm(d.city)}`;
+    acc[key] ??= [];
+    acc[key].push(d);
+    return acc;
+  }, {})
+).filter((g: Dealer[]) => g.length > 1);
+
 
   return (
     <main style={{ padding: 24 }}>
@@ -148,3 +156,4 @@ export default function DealersAdminPage() {
     </main>
   );
 }
+
