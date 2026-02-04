@@ -24,7 +24,6 @@ export default function AdminDealersPage() {
   const [loading, setLoading] = useState(true);
   const [busyGroupKey, setBusyGroupKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
   const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
@@ -37,7 +36,9 @@ export default function AdminDealersPage() {
 
     const { data, error } = await supabase
       .from("dealers")
-      .select("id,name,city,postal_code,street,source,is_master,duplicate_of,created_at")
+      .select(
+        "id,name,city,postal_code,street,source,is_master,duplicate_of,created_at"
+      )
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -50,11 +51,16 @@ export default function AdminDealersPage() {
     setLoading(false);
   }
 
+  /**
+   * Gruppierung:
+   * 1) Name + Stadt (bewusst OHNE PLZ)
+   * 2) Innerhalb der Gruppe prüfen wir, ob mehrere PLZ existieren
+   */
   const groups = useMemo(() => {
     const acc = new Map<string, Dealer[]>();
 
     for (const d of dealers) {
-      const key = `${norm(d.name)}|${norm(d.city)}|${norm(d.postal_code)}`;
+      const key = `${norm(d.name)}|${norm(d.city)}`;
       const arr = acc.get(key) ?? [];
       arr.push(d);
       acc.set(key, arr);
@@ -63,7 +69,9 @@ export default function AdminDealersPage() {
     return Array.from(acc.entries())
       .map(([key, list]) => ({ key, list }))
       .filter(({ list }) => (showAll ? true : list.length > 1))
-      .sort((a, b) => (a.list[0]?.name ?? "").localeCompare(b.list[0]?.name ?? ""));
+      .sort((a, b) =>
+        (a.list[0]?.name ?? "").localeCompare(b.list[0]?.name ?? "")
+      );
   }, [dealers, showAll]);
 
   async function setMaster(masterId: number, groupKey: string, group: Dealer[]) {
@@ -107,7 +115,7 @@ export default function AdminDealersPage() {
             checked={showAll}
             onChange={(e) => setShowAll(e.target.checked)}
           />
-          Alle Händler anzeigen (nicht nur Dubletten)
+          Alle Händler anzeigen
         </label>
 
         <button onClick={loadDealers} disabled={loading}>
@@ -131,27 +139,48 @@ export default function AdminDealersPage() {
           const master = list.find((x) => x.is_master) ?? list[0];
           const groupBusy = busyGroupKey === key;
 
+          const postalCodes = Array.from(
+            new Set(list.map((d) => norm(d.postal_code)).filter(Boolean))
+          );
+          const hasPostalWarning = postalCodes.length > 1;
+
           return (
             <section
               key={key}
               style={{
-                marginTop: 24,
+                marginTop: 28,
                 paddingTop: 16,
-                borderTop: "1px solid #ddd",
+                borderTop: "2px solid #ddd",
                 opacity: groupBusy ? 0.6 : 1,
               }}
             >
               <h3 style={{ margin: 0 }}>
                 {master?.name}
                 {master?.city ? ` – ${master.city}` : ""}
-                {master?.postal_code ? ` (${master.postal_code})` : ""}
                 <span style={{ fontWeight: 400, opacity: 0.7 }}>
                   {" "}
                   (Datensätze: {list.length})
                 </span>
               </h3>
 
-              <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10 }}>
+              {hasPostalWarning && (
+                <div
+                  style={{
+                    marginTop: 8,
+                    padding: "8px 12px",
+                    background: "#fff3cd",
+                    border: "1px solid #ffe69c",
+                    borderRadius: 4,
+                    color: "#664d03",
+                  }}
+                >
+                  ⚠️ <strong>Achtung:</strong> Unterschiedliche PLZ innerhalb dieser Gruppe (
+                  {postalCodes.join(", ")}).  
+                  Vermutlich mehrere Filialen – bitte genau prüfen, bevor du zusammenführst.
+                </div>
+              )}
+
+              <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 12 }}>
                 <thead>
                   <tr>
                     <th align="left">ID</th>
@@ -188,7 +217,7 @@ export default function AdminDealersPage() {
                             Als Master setzen
                           </button>
                         ) : (
-                          <span style={{ opacity: 0.7 }}>—</span>
+                          <span style={{ opacity: 0.6 }}>—</span>
                         )}
                       </td>
                     </tr>
