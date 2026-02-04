@@ -10,7 +10,9 @@ add column if not exists city text,
 add column if not exists country text,
 add column if not exists email text,
 add column if not exists phone text,
-add column if not exists website text,
+	add column if not exists website text,
+	add column if not exists postal_code text,
+	add column if not exists brands text[] default '{}'::text[],
 add column if not exists source text,
 add column if not exists notes text;
 

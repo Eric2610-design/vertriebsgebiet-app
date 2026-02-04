@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import * as XLSX from "xlsx";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
-import { norm } from "@/lib/dealerUtils";
+import { norm, normStreet } from "@/lib/dealerUtils";
 
 type Mapping = {
   name: string;
@@ -64,11 +64,33 @@ function guessMapping(headers: string[]) {
     source: "",
   };
 
+  // Besseres Auto-Mapping:
+  // - bewertet Treffer (genauer Match gewinnt)
+  // - verhindert, dass „irgendeine“ Spalte für alle Felder verwendet wird
   const normHeaders = headers.map((h) => ({ raw: h, n: normHeader(h) }));
+  const used = new Set<string>();
+
+  const score = (headerNorm: string, hint: string) => {
+    if (headerNorm === hint) return 5;
+    if (headerNorm.startsWith(hint)) return 4;
+    if (headerNorm.includes(hint)) return 3;
+    return 0;
+  };
 
   for (const f of FIELDS) {
-    const hit = normHeaders.find((h) => f.hints.some((k) => h.n.includes(k)));
-    if (hit) (m as any)[f.key] = hit.raw;
+    let best: { raw: string; s: number } | null = null;
+    for (const h of normHeaders) {
+      if (used.has(h.raw)) continue;
+      let s = 0;
+      for (const hint of f.hints) s = Math.max(s, score(h.n, hint));
+      if (s <= 0) continue;
+      if (!best || s > best.s) best = { raw: h.raw, s };
+    }
+    if (best) {
+      (m as any)[f.key] = best.raw;
+      // „source“ darf auch gerne leer bleiben; ansonsten wie alle Felder eindeutig.
+      used.add(best.raw);
+    }
   }
 
   return m;
@@ -99,8 +121,9 @@ function mostCommon(values: (string | null)[]) {
   return best;
 }
 
-function buildDedupeKey(name: any, zipcode: any, city: any) {
-  return `${norm(name)}|${norm(zipcode)}|${norm(city)}`;
+function buildDedupeKey(name: any, street: any, zipcode: any, city: any) {
+  // Street unbedingt aufnehmen, sonst werden unterschiedliche Filialen in derselben PLZ/Stadt fälschlich zusammengeführt.
+  return `${norm(name)}|${normStreet(street)}|${norm(zipcode)}|${norm(city)}`;
 }
 
 function mergeSource(existing: any, incoming: string) {
@@ -127,6 +150,7 @@ export default function UploadWizard() {
   const search = useSearchParams();
 
   const [fileName, setFileName] = useState<string>("");
+  const [manualSource, setManualSource] = useState<string>("");
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [mapping, setMapping] = useState<Mapping>(() => guessMapping([]));
@@ -170,6 +194,8 @@ export default function UploadWizard() {
     setMsg("");
     setLastRunId(null);
     setFileName(file.name);
+    // Default: Dateiname ohne Endung als Hersteller/Quelle vorschlagen
+    setManualSource(file.name.replace(/\.[^.]+$/, ""));
 
     const data = await file.arrayBuffer();
     const wb = XLSX.read(data, { type: "array" });
@@ -229,7 +255,9 @@ export default function UploadWizard() {
       mapping.source && rows.length
         ? rows.slice(0, 800).map((r) => (pick(r, mapping.source) as string | null))
         : [];
-    const runSource = mostCommon(sourceCandidates) ?? fileName;
+    const runSource =
+      mostCommon(sourceCandidates) ??
+      (manualSource?.trim() || fileName.replace(/\.[^.]+$/, ""));
 
     // Händler vorbereiten
     const prepared = rows
@@ -241,7 +269,7 @@ export default function UploadWizard() {
         const city = pick(r, mapping.city);
         const src = (pick(r, mapping.source) ?? runSource) as string;
 
-        const dedupe_key = buildDedupeKey(name, zipcode, city);
+        const dedupe_key = buildDedupeKey(name, street, zipcode, city);
 
         return {
           name,
@@ -304,12 +332,21 @@ export default function UploadWizard() {
         const keys = Array.from(new Set(chunk.map((x: any) => x.dedupe_key).filter(Boolean)));
 
         // existing map (dedupe_key -> row)
-        const { data: existingRows, error: exErr } = await supabase
-          .from("dealers")
-          .select("id,dedupe_key,name,source,street,zipcode,postal_code,city,country,email,phone,website")
-          .in("dedupe_key", keys);
-
-        if (exErr) throw new Error(exErr.message);
+        // Achtung: Supabase REST-Query nutzt GET & URL-Parameter -> zu viele/lange Keys (Flyer!) führen zu 400.
+        // Daher: Keys in kleinen Portionen holen.
+        const existingRows: any[] = [];
+        const keyBatchSize = 120;
+        for (let k = 0; k < keys.length; k += keyBatchSize) {
+          const part = keys.slice(k, k + keyBatchSize);
+          const { data, error: exErr } = await supabase
+            .from("dealers")
+            .select(
+              "id,dedupe_key,name,source,street,zipcode,postal_code,city,country,email,phone,website,brands"
+            )
+            .in("dedupe_key", part);
+          if (exErr) throw new Error(exErr.message);
+          if (data?.length) existingRows.push(...data);
+        }
 
         const existingByKey = new Map<string, any>();
         for (const r of existingRows ?? []) {
@@ -469,6 +506,17 @@ export default function UploadWizard() {
               }}
             />
             {fileName ? <span className="badge">{fileName}</span> : null}
+          </div>
+
+          <div className="grid" style={{ gap: 6, marginBottom: 10 }}>
+            <div className="muted" style={{ fontSize: 13 }}>
+              Hersteller/Quelle (wird im Upload-Run gespeichert und als "source" an Händler gehängt, falls keine Quelle-Spalte gemappt ist)
+            </div>
+            <input
+              value={manualSource}
+              onChange={(e) => setManualSource(e.target.value)}
+              placeholder="z.B. FLYER"
+            />
           </div>
 
           {quality ? (

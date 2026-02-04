@@ -27,6 +27,25 @@ export function norm(v: any) {
     .replace(/ß/g, "ss");
 }
 
+// Straße separat normalisieren (Str./Straße, Sonderzeichen, Mehrfach-Leerzeichen, Bindestriche).
+// Wird für Dedupe-Keys genutzt, damit Filialen sauber getrennt werden, aber Schreibvarianten stabil bleiben.
+export function normStreet(v: any) {
+  return norm(v)
+    // "str." / "str" / "straße" / "strasse" vereinheitlichen
+    .replace(/\bstr\.?\b/g, "strasse")
+    .replace(/\bstraße\b/g, "strasse")
+    // häufige Trenner vereinheitlichen
+    .replace(/[\u2010-\u2015]/g, "-")
+    .replace(/\s*-\s*/g, "-")
+    .replace(/\s*\/\s*/g, "/")
+    .replace(/\s+\./g, ".")
+    .replace(/\.+/g, ".")
+    // alles außer Buchstaben/Zahlen/Leerzeichen/-/./,/\ entfernen
+    .replace(/[^a-z0-9\s\-\.\,\/]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function dealerKey(d: Partial<Dealer>) {
   return `${norm(d.name)}|${norm(d.zipcode)}|${norm(d.city)}`;
 }
