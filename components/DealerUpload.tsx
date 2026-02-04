@@ -9,6 +9,7 @@ type Row = Record<string, any>;
 type Mapping = {
   name?: string;
   city?: string;
+  postal_code?: string;
   street?: string;
 };
 
@@ -20,6 +21,9 @@ type Profile = {
 
 const LS_KEY = "dealer_upload_mapping_profiles_v1";
 
+/* ===============================
+   LocalStorage Helpers
+   =============================== */
 function loadProfiles(): Profile[] {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -43,7 +47,7 @@ function safeStr(v: any): string | null {
 }
 
 /* ===============================
-   Auto-Mapping (Vorschläge)
+   Auto Mapping Suggestions
    =============================== */
 function normalizeHeader(h: string) {
   return h
@@ -71,15 +75,12 @@ const AUTO_FIELDS = {
     "bezeichnung",
   ],
   city: ["ort", "stadt", "city", "town", "plzort", "ortplz"],
+  postal_code: ["plz", "postleitzahl", "zip", "zipcode", "postalcode"],
   street: ["strasse", "str", "street", "adresse", "anschrift"],
 } as const;
 
 function autoDetectMapping(headers: string[]): Mapping {
-  const norm = headers.map((h) => ({
-    original: h,
-    n: normalizeHeader(h),
-  }));
-
+  const norm = headers.map((h) => ({ original: h, n: normalizeHeader(h) }));
   const result: Mapping = {};
 
   (Object.keys(AUTO_FIELDS) as (keyof typeof AUTO_FIELDS)[]).forEach((field) => {
@@ -102,14 +103,13 @@ export default function DealerUpload() {
   const [status, setStatus] = useState<string>("Bitte Excel-Datei auswählen");
   const [busy, setBusy] = useState(false);
 
-  // Profile State
+  // Profiles
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<string>(""); // profileName
   const [newProfileName, setNewProfileName] = useState<string>("");
 
   useEffect(() => {
-    const p = loadProfiles();
-    setProfiles(p);
+    setProfiles(loadProfiles());
   }, []);
 
   const selectedProfileObj = useMemo(
@@ -118,7 +118,7 @@ export default function DealerUpload() {
   );
 
   /* ===============================
-     1️⃣ Datei einlesen
+     1) Datei einlesen
      =============================== */
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -138,7 +138,6 @@ export default function DealerUpload() {
         setStatus("❌ Datei enthält keine Daten");
         setRows([]);
         setHeaders([]);
-        setBusy(false);
         return;
       }
 
@@ -146,10 +145,7 @@ export default function DealerUpload() {
       setRows(data);
       setHeaders(hdrs);
 
-      // ✅ Vorbelegung:
-      // 1) wenn Profil gewählt → Profil-Mapping
-      // 2) wenn genau 1 Profil existiert → Profil-Mapping
-      // 3) sonst Auto-Mapping
+      // Priorität: Profil -> (wenn nur 1 Profil existiert) -> Auto -> leer
       if (selectedProfileObj) {
         setMapping(selectedProfileObj.mapping);
         setStatus(`Spalten erkannt – Mapping aus Profil „${selectedProfileObj.profileName}“ geladen`);
@@ -178,14 +174,13 @@ export default function DealerUpload() {
   }
 
   /* ===============================
-     2️⃣ Profil anwenden
+     2) Profil anwenden
      =============================== */
   function applyProfile(profileName: string) {
     setSelectedProfile(profileName);
     const p = profiles.find((x) => x.profileName === profileName);
     if (!p) {
-      // Profil "— kein Profil —"
-      setStatus("Profil entfernt");
+      setStatus("Kein Profil angewendet");
       return;
     }
     setMapping(p.mapping);
@@ -193,10 +188,10 @@ export default function DealerUpload() {
   }
 
   /* ===============================
-     3️⃣ Profil speichern / überschreiben
+     3) Profil speichern/überschreiben
      =============================== */
   function saveCurrentAsProfile() {
-    const name = newProfileName.trim() || selectedProfile.trim();
+    const name = (newProfileName.trim() || selectedProfile.trim()).trim();
     if (!name) {
       alert("Bitte Profilnamen eingeben.");
       return;
@@ -219,7 +214,7 @@ export default function DealerUpload() {
   }
 
   /* ===============================
-     4️⃣ Profil löschen
+     4) Profil löschen
      =============================== */
   function deleteSelectedProfile() {
     if (!selectedProfile) return;
@@ -233,7 +228,7 @@ export default function DealerUpload() {
   }
 
   /* ===============================
-     5️⃣ Import starten
+     5) Import starten
      =============================== */
   async function startImport() {
     if (!mapping.name) {
@@ -249,6 +244,7 @@ export default function DealerUpload() {
         .map((r) => ({
           name: safeStr(r[mapping.name!]),
           city: mapping.city ? safeStr(r[mapping.city]) : null,
+          postal_code: mapping.postal_code ? safeStr(r[mapping.postal_code]) : null,
           street: mapping.street ? safeStr(r[mapping.street]) : null,
           source: selectedProfile || fileName || "upload",
         }))
@@ -256,7 +252,6 @@ export default function DealerUpload() {
 
       if (!payload.length) {
         setStatus("❌ Keine gültigen Zeilen (kein Händlername nach Mapping).");
-        setBusy(false);
         return;
       }
 
@@ -308,7 +303,7 @@ export default function DealerUpload() {
             </select>
           </div>
 
-          <div style={{ minWidth: 220 }}>
+          <div style={{ minWidth: 240 }}>
             <label>
               <strong>Profil speichern als</strong>
             </label>
@@ -341,6 +336,7 @@ export default function DealerUpload() {
             {[
               { key: "name", label: "Händlername (Pflichtfeld)" },
               { key: "city", label: "Stadt" },
+              { key: "postal_code", label: "PLZ" },
               { key: "street", label: "Straße" },
             ].map((f) => (
               <div key={f.key} style={{ marginBottom: 12 }}>
@@ -348,7 +344,9 @@ export default function DealerUpload() {
                 <br />
                 <select
                   value={(mapping as any)[f.key] ?? ""}
-                  onChange={(e) => setMapping({ ...mapping, [f.key]: e.target.value || undefined })}
+                  onChange={(e) =>
+                    setMapping({ ...mapping, [f.key]: e.target.value || undefined })
+                  }
                   disabled={busy}
                 >
                   <option value="">— nicht zuordnen —</option>
@@ -371,8 +369,8 @@ export default function DealerUpload() {
             </div>
 
             <p style={{ marginTop: 12, opacity: 0.8 }}>
-              Tipp: Wähle dein Mapping einmal, klick „Profil speichern“ (z. B. „Riese & Müller“).
-              Beim nächsten Upload einfach Profil auswählen → Import ohne Neu-Zuordnung.
+              Tipp: Wenn die Auto-Vorschläge passen, direkt importieren. Wenn du ein wiederkehrendes Format hast: Profil
+              speichern (z. B. „R&M“, „Flyer“, „ZEG“) → nächstes Mal ist alles vorbefüllt.
             </p>
           </div>
         )}
