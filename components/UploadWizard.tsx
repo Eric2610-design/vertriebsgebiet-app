@@ -1,522 +1,381 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import React, { useMemo, useState } from "react";
 import * as XLSX from "xlsx";
-import Link from "next/link";
-import { supabase } from "@/lib/supabaseClient";
+import { createClient } from "@supabase/supabase-js";
 import { norm, normStreet } from "@/lib/dealerUtils";
-
-type Mapping = {
-  name: string;
-  street: string;
-  zipcode: string;
-  city: string;
-  country: string;
-  email: string;
-  phone: string;
-  website: string;
-};
 
 type Row = Record<string, any>;
 
-type RunBrief = {
-  id: number;
-  created_at: string;
-  file_name?: string | null;
-  source?: string | null;
-};
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-const FIELDS: { key: keyof Mapping; label: string; required?: boolean; hints: string[] }[] = [
-  { key: "name", label: "Name", required: true, hints: ["name", "händler", "haendler", "dealer", "firma", "shop"] },
-  { key: "street", label: "Straße", hints: ["street", "strasse", "straße", "adresse", "address"] },
-  { key: "zipcode", label: "PLZ", hints: ["plz", "zip", "zipcode", "postleitzahl", "postal"] },
-  { key: "city", label: "Ort", hints: ["city", "ort", "stadt", "town"] },
-  { key: "country", label: "Land", hints: ["country", "land", "nation"] },
-  { key: "email", label: "E-Mail", hints: ["mail", "email", "e-mail"] },
-  { key: "phone", label: "Telefon", hints: ["tel", "phone", "telefon", "mobile"] },
-  { key: "website", label: "Website", hints: ["web", "website", "url", "homepage"] },
-];
-
-function normHeader(s: any) {
-  return String(s ?? "")
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, " ")
-    .replace(/ä/g, "ae")
-    .replace(/ö/g, "oe")
-    .replace(/ü/g, "ue")
-    .replace(/ß/g, "ss");
+function uniq<T>(arr: T[]) {
+  return Array.from(new Set(arr));
 }
 
-function guessMapping(headers: string[]) {
-  const m: Mapping = {
-    name: "",
-    street: "",
-    zipcode: "",
-    city: "",
-    country: "",
-    email: "",
-    phone: "",
-    website: "",
-  };
-
-  const normHeaders = headers.map((h) => ({ raw: h, n: normHeader(h) }));
-
-  for (const f of FIELDS) {
-    const hit = normHeaders.find((h) => f.hints.some((k) => h.n.includes(k)));
-    if (hit) (m as any)[f.key] = hit.raw;
-  }
-
-  return m;
-}
-
-function pick(row: Row, col: string) {
-  if (!col) return null;
-  const v = row[col];
-  const s = String(v ?? "").trim();
+function pick(row: Row, key: string | undefined) {
+  if (!key) return null;
+  const v = row[key];
+  if (v === undefined || v === null) return null;
+  const s = String(v).trim();
   return s.length ? s : null;
 }
 
-function mergeValue(existing: any, incoming: any, overwrite: boolean) {
-  const ex = String(existing ?? "").trim();
-  const inc = String(incoming ?? "").trim();
-  if (!inc) return ex || null;
-  if (!ex) return inc;
-  return overwrite ? inc : ex;
+function buildDedupeKey(name: any, street: any, zipcode: any, city: any) {
+  // Straße bewusst mit drin, sonst kollidieren zu viele "Fahrrad XXL" etc.
+  return `${norm(name)}|${normStreet(street)}|${norm(zipcode)}|${norm(city)}`;
 }
 
-function unionBrands(a: any, b: any) {
-  const arr = [...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])]
-    .map((x) => String(x ?? "").trim())
-    .filter(Boolean);
-  return Array.from(new Set(arr)).sort((x, y) => x.localeCompare(y, "de"));
+function mergeValue(existing: any, incoming: any, overwrite: boolean) {
+  if (overwrite) return incoming ?? existing ?? null;
+  return existing ?? incoming ?? null;
+}
+
+function mergeSource(existing: any, incoming: any) {
+  const a = String(existing ?? "").trim();
+  const b = String(incoming ?? "").trim();
+  if (!a) return b || null;
+  if (!b) return a || null;
+
+  // Beide behalten (deterministisch sortiert)
+  const parts = uniq(
+    `${a};${b}`
+      .split(";")
+      .map((x) => x.trim())
+      .filter(Boolean)
+  ).sort();
+  return parts.join(";");
+}
+
+async function parseXlsx(file: File) {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const wsName = wb.SheetNames[0];
+  const ws = wb.Sheets[wsName];
+  const json = XLSX.utils.sheet_to_json<Row>(ws, { defval: null });
+  return json;
+}
+
+// Supabase REST nutzt bei `.in()` Query-Parameter. Bei sehr vielen Keys wird die URL zu lang (400).
+// Daher holen wir existierende Dealer in kleinen Batches.
+async function fetchExistingDealersByDedupeKeys(keys: string[]) {
+  const out = new Map<string, any>();
+  const BATCH = 50; // konservativ, damit die URL klein bleibt
+
+  for (let i = 0; i < keys.length; i += BATCH) {
+    const batch = keys.slice(i, i + BATCH);
+
+    const { data, error } = await supabase
+      .from("dealers")
+      // bewusst ohne `brands` (falls Spalte noch nicht existiert)
+      .select(
+        "id,dedupe_key,name,source,street,zipcode,postal_code,city,country,email,phone,website"
+      )
+      .in("dedupe_key", batch);
+
+    if (error) throw new Error(error.message);
+
+    for (const r of data ?? []) {
+      if (r?.dedupe_key) out.set(String(r.dedupe_key), r);
+    }
+  }
+
+  return out;
 }
 
 export default function UploadWizard() {
-  const search = useSearchParams();
-
-  const [fileName, setFileName] = useState<string>("");
-  const [headers, setHeaders] = useState<string[]>([]);
+  const [file, setFile] = useState<File | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
-  const [mapping, setMapping] = useState<Mapping>(() => guessMapping([]));
-  const [importing, setImporting] = useState(false);
-  const [msg, setMsg] = useState<string>("");
-  const [brand, setBrand] = useState<string>("");
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [log, setLog] = useState<string>("");
 
-  const [overwriteExisting, setOverwriteExisting] = useState(false);
-  const [rollbackEnabled, setRollbackEnabled] = useState(false);
-  const [rollbackRunId, setRollbackRunId] = useState<number | null>(null);
-  const [runs, setRuns] = useState<RunBrief[]>([]);
-  const [lastRunId, setLastRunId] = useState<number | null>(null);
+  const [runSource, setRunSource] = useState<string>("flyer");
+  const [overwriteExisting, setOverwriteExisting] = useState<boolean>(false);
 
-  useEffect(() => {
-    const q = search?.get("reimport");
-    const id = q ? Number(q) : NaN;
-    if (Number.isFinite(id) && id > 0) {
-      setRollbackEnabled(true);
-      setRollbackRunId(id);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/uploads/list?limit=200", { cache: "no-store" });
-        const json = await res.json();
-        if (json?.ok && Array.isArray(json.runs)) {
-          setRuns(json.runs);
-        }
-      } catch {
-        // ignore
-      }
-    })();
-  }, []);
-
-  async function onFile(file: File) {
-    setMsg("");
-    setLastRunId(null);
-    setFileName(file.name);
-
-    const data = await file.arrayBuffer();
-    const wb = XLSX.read(data, { type: "array" });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const json = XLSX.utils.sheet_to_json(ws, { defval: "" }) as Row[];
-
-    const hs = json.length ? Object.keys(json[0]) : [];
-    setHeaders(hs);
-    setRows(json);
-    setMapping(guessMapping(hs));
-  }
-
-  const quality = useMemo(() => {
-    const total = rows.length || 0;
-    if (!total) return null;
-
-    const hasName = rows.filter((r) => !!pick(r, mapping.name)).length;
-    const hasStreet = rows.filter((r) => !!pick(r, mapping.street)).length;
-    const hasZip = rows.filter((r) => !!pick(r, mapping.zipcode)).length;
-    const hasCity = rows.filter((r) => !!pick(r, mapping.city)).length;
-
-    const full = rows.filter((r) => {
-      return !!pick(r, mapping.name) && !!pick(r, mapping.street) && !!pick(r, mapping.zipcode) && !!pick(r, mapping.city);
-    }).length;
-
-    return { total, hasName, hasStreet, hasZip, hasCity, full };
-  }, [rows, mapping]);
+  const [mapping, setMapping] = useState({
+    name: "name",
+    street: "street",
+    zipcode: "zipcode",
+    city: "city",
+    country: "country",
+    email: "email",
+    phone: "phone",
+    website: "website",
+    source: "source",
+  });
 
   const canImport = useMemo(() => {
-    if (!rows.length) return false;
-    if (!mapping.name) return false;
-    return true;
-  }, [rows.length, mapping.name]);
+    return rows.length > 0 && mapping.name && mapping.zipcode && mapping.city;
+  }, [rows.length, mapping]);
 
-  async function rollbackIfNeeded() {
-    if (!rollbackEnabled || !rollbackRunId) return;
-    const res = await fetch("/api/uploads/delete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: rollbackRunId }),
-    });
-    const json = await res.json();
-    if (!json.ok) {
-      throw new Error(json.error ?? "Rollback fehlgeschlagen");
+  async function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0] ?? null;
+    setFile(f);
+    setLog("");
+    setRows([]);
+    setHeaders([]);
+
+    if (!f) return;
+
+    setLoading(true);
+    try {
+      const data = await parseXlsx(f);
+      setRows(data);
+      setHeaders(data.length ? Object.keys(data[0] ?? {}) : []);
+      setLog((p) => p + `\n✅ Datei gelesen: ${data.length} Zeilen`);
+    } catch (err: any) {
+      console.error(err);
+      setLog((p) => p + `\n❌ Fehler beim Einlesen: ${err?.message ?? String(err)}`);
+    } finally {
+      setLoading(false);
     }
   }
 
-  function buildKey(name: any, street: any, zipcode: any, city: any) {
-    return `${norm(name)}|${normStreet(street)}|${norm(zipcode)}|${norm(city)}`;
-  }
-
-  function compressPrepared(prepared: any[], overwrite: boolean) {
-    const byKey = new Map<string, any>();
-
-    for (const it of prepared) {
-      const k = String(it.dedupe_key ?? "").trim();
-      if (!k) continue;
-
-      const ex = byKey.get(k);
-      if (!ex) {
-        byKey.set(k, { ...it });
-        continue;
-      }
-
-      byKey.set(k, {
-        ...ex,
-        name: mergeValue(ex.name, it.name, overwrite),
-        street: mergeValue(ex.street, it.street, overwrite),
-        zipcode: mergeValue(ex.zipcode, it.zipcode, overwrite),
-        city: mergeValue(ex.city, it.city, overwrite),
-        country: mergeValue(ex.country, it.country, overwrite),
-        email: mergeValue(ex.email, it.email, overwrite),
-        phone: mergeValue(ex.phone, it.phone, overwrite),
-        website: mergeValue(ex.website, it.website, overwrite),
-        source: mergeValue(ex.source, it.source, overwrite),
-        brands: unionBrands(ex.brands, it.brands),
-      });
-    }
-
-    return Array.from(byKey.values());
-  }
-
-  async function doImport() {
+  async function startImport() {
     if (!canImport) return;
 
-    setImporting(true);
-    setMsg("");
-    setLastRunId(null);
-
-    const runBrand = brand.trim() || null;
-
-    const preparedRaw = rows
-      .map((r) => {
-        const name = pick(r, mapping.name);
-        if (!name) return null;
-
-        const street = pick(r, mapping.street);
-        const zipcode = pick(r, mapping.zipcode) ?? pick(r, "postal_code");
-        const city = pick(r, mapping.city);
-
-        const dedupe_key = buildKey(name, street, zipcode, city);
-
-        return {
-          name,
-          street,
-          zipcode,
-          city,
-          country: pick(r, mapping.country) ?? "Deutschland",
-          email: pick(r, mapping.email),
-          phone: pick(r, mapping.phone),
-          website: pick(r, mapping.website),
-
-          source: runBrand ?? fileName,
-          dedupe_key,
-          brands: runBrand ? [runBrand] : [],
-
-          is_master: true,
-          duplicate_of: null,
-        };
-      })
-      .filter(Boolean) as any[];
-
-    const skipped = rows.length - preparedRaw.length;
-    const prepared = compressPrepared(preparedRaw, overwriteExisting);
+    setLoading(true);
+    setLog((p) => p + "\n⏳ Import gestartet ...");
 
     try {
-      if (!prepared.length) {
-        throw new Error("Es wurden keine gültigen Händler erkannt (kein Name gefunden). Prüfe Mapping.");
-      }
-
-      if (rollbackEnabled && rollbackRunId) {
-        setMsg(`⏪ Rollback Run #${rollbackRunId} …`);
-        await rollbackIfNeeded();
-      }
-
-      const { data: run, error: runErr } = await supabase
+      // 1) Upload-Run erzeugen
+      const { data: uploadRun, error: runErr } = await supabase
         .from("upload_runs")
         .insert({
-          file_name: fileName,
-          source: runBrand ?? fileName,
-          rows_in_file: rows.length,
-          inserted_count: 0,
-          updated_count: 0,
-          skipped_count: skipped,
-          error_count: 0,
-          notes: `brand=${runBrand ?? "-"}; unique_keys=${prepared.length}; raw_rows=${preparedRaw.length}; dedup_in_file=yes`,
+          filename: file?.name ?? null,
+          source: runSource,
+          total_rows: rows.length,
         })
         .select("id")
         .single();
 
-      if (runErr) throw runErr;
-      const uploadRunId: number = run?.id;
-      setLastRunId(uploadRunId);
+      if (runErr) throw new Error(runErr.message);
+      const uploadRunId = uploadRun.id as string;
 
-      const chunkSize = 800;
-      let inserted = 0;
-      let updated = 0;
+      // 2) Rows -> normalized dealer candidates
+      const prepared = rows
+        .map((r) => {
+          const name = pick(r, mapping.name);
+          if (!name) return null;
 
-      for (let i = 0; i < prepared.length; i += chunkSize) {
-        const chunk = prepared.slice(i, i + chunkSize);
-        const keys = chunk.map((x: any) => x.dedupe_key).filter(Boolean);
+          const zipcode = pick(r, mapping.zipcode) ?? pick(r, "postal_code");
+          const city = pick(r, mapping.city);
+          const street = pick(r, mapping.street);
+          const src = (pick(r, mapping.source) ?? runSource) as string;
 
-        const { data: existingRows, error: exErr } = await supabase
-          .from("dealers")
-          .select("id,dedupe_key,name,street,zipcode,postal_code,city,country,email,phone,website,brands,source")
-          .in("dedupe_key", keys);
+          const dedupe_key = buildDedupeKey(name, street, zipcode, city);
 
-        if (exErr) throw new Error(exErr.message);
+          return {
+            dedupe_key,
+            name,
+            street,
+            zipcode,
+            postal_code: zipcode,
+            city,
+            country: pick(r, mapping.country),
+            email: pick(r, mapping.email),
+            phone: pick(r, mapping.phone),
+            website: pick(r, mapping.website),
+            source: src,
+          };
+        })
+        .filter(Boolean) as any[];
 
-        const existingByKey = new Map<string, any>();
-        for (const r of existingRows ?? []) {
-          if (r?.dedupe_key) existingByKey.set(String(r.dedupe_key), r);
-        }
+      const keys = uniq(
+        prepared
+          .map((x) => String(x.dedupe_key ?? ""))
+          .filter((x) => x.length > 0)
+      );
 
-        const toInsert: any[] = [];
-        const toUpdate: any[] = [];
-        const sourceRuns: any[] = [];
+      // 3) Existing (chunked, damit keine 400 URL-Länge)
+      const existingByKey = await fetchExistingDealersByDedupeKeys(keys);
+
+      // 4) Upsert-Plan bauen: neue Dealer rein, bestehende nur optional updaten
+      const toInsert: any[] = [];
+      const toUpdate: any[] = [];
+      const sourceRuns: any[] = [];
+      const seenInsert = new Set<string>();
+
+      // Chunk-weise arbeiten, damit memory ruhig bleibt
+      const CHUNK = 1000;
+      for (let i = 0; i < prepared.length; i += CHUNK) {
+        const chunk = prepared.slice(i, i + CHUNK);
 
         for (const it of chunk) {
-          const ex = existingByKey.get(String(it.dedupe_key));
+          const key = String(it.dedupe_key);
+          const ex = existingByKey.get(key);
 
           if (!ex) {
+            const k = String(it.dedupe_key ?? "");
+            if (k && seenInsert.has(k)) continue; // Duplikate im selben Upload verhindern
+            if (k) seenInsert.add(k);
+
             toInsert.push({
               ...it,
-              upload_run_id: uploadRunId,
+              upload_run_id: uploadRunId, // nur für NEU
             });
           } else {
+            // Smart merge (keine Daten zerstören)
+            const mergedSource = mergeSource(ex.source, it.source);
             toUpdate.push({
               dedupe_key: it.dedupe_key,
               name: mergeValue(ex.name, it.name, overwriteExisting),
               street: mergeValue(ex.street, it.street, overwriteExisting),
-              zipcode: mergeValue(ex.zipcode ?? ex.postal_code, it.zipcode, overwriteExisting),
+              zipcode: mergeValue(ex.zipcode, it.zipcode, overwriteExisting),
+              postal_code: mergeValue(ex.postal_code, it.postal_code, overwriteExisting),
               city: mergeValue(ex.city, it.city, overwriteExisting),
               country: mergeValue(ex.country, it.country, overwriteExisting),
               email: mergeValue(ex.email, it.email, overwriteExisting),
               phone: mergeValue(ex.phone, it.phone, overwriteExisting),
               website: mergeValue(ex.website, it.website, overwriteExisting),
-              brands: unionBrands(ex.brands, it.brands),
-              source: mergeValue(ex.source, it.source, overwriteExisting),
+              source: mergedSource,
             });
           }
-        }
 
-        let insertedRows: any[] = [];
-        if (toInsert.length) {
-          const { data: insData, error: insErr } = await supabase
-            .from("dealers")
-            .insert(toInsert)
-            .select("id,dedupe_key");
-
-          if (insErr) {
-            const em = String(insErr.message ?? "").toLowerCase();
-            if (em.includes("duplicate") || em.includes("23505")) {
-              const safeUp = toInsert.map(({ upload_run_id, ...rest }) => rest);
-              const { error: upErr } = await supabase.from("dealers").upsert(safeUp, { onConflict: "dedupe_key" });
-              if (upErr) throw new Error(upErr.message);
-              updated += toInsert.length;
-            } else {
-              throw new Error(insErr.message);
-            }
-          } else {
-            insertedRows = insData ?? [];
-            inserted += toInsert.length;
-          }
+          // Upload-Run->Dealer Zuordnung (optional)
+          sourceRuns.push({
+            upload_run_id: uploadRunId,
+            source: runSource,
+            dedupe_key: it.dedupe_key,
+          });
         }
-
-        if (toUpdate.length) {
-          const { error: upErr } = await supabase.from("dealers").upsert(toUpdate, { onConflict: "dedupe_key" });
-          if (upErr) throw new Error(upErr.message);
-          updated += toUpdate.length;
-        }
-
-        const idByKey = new Map<string, number>();
-        for (const r of existingRows ?? []) {
-          if (r?.dedupe_key && r?.id) idByKey.set(String(r.dedupe_key), Number(r.id));
-        }
-        for (const r of insertedRows ?? []) {
-          if (r?.dedupe_key && r?.id) idByKey.set(String(r.dedupe_key), Number(r.id));
-        }
-
-        const seen = new Set<string>();
-        for (const it of chunk) {
-          const dealerId = idByKey.get(String(it.dedupe_key));
-          if (!dealerId) continue;
-          const src = String((runBrand ?? fileName) || "").trim();
-          if (!src) continue;
-          const k = `${dealerId}|${src}`;
-          if (seen.has(k)) continue;
-          seen.add(k);
-          sourceRuns.push({ dealer_id: dealerId, source: src, upload_run_id: uploadRunId });
-        }
-
-        if (sourceRuns.length) {
-          await supabase.from("dealer_source_runs").upsert(sourceRuns, { onConflict: "dealer_id,source,upload_run_id" });
-        }
-
-        setMsg(`⏳ Import… ${Math.min(i + chunk.length, prepared.length)} / ${prepared.length} unique Händler · inserted ${inserted}, updated ${updated}`);
       }
 
-      await supabase
+      setLog((p) =>
+        p +
+        `\n🧩 Kandidaten: ${prepared.length} | Keys: ${keys.length} | neu: ${toInsert.length} | update: ${toUpdate.length}`
+      );
+
+      // 5) Insert neue Dealer (bulk)
+      if (toInsert.length) {
+        const { error: insErr } = await supabase.from("dealers").insert(toInsert);
+        if (insErr) throw new Error(insErr.message);
+      }
+
+      // 6) Update bestehende Dealer (bulk in kleinen Batches)
+      if (toUpdate.length) {
+        const B = 200;
+        for (let i = 0; i < toUpdate.length; i += B) {
+          const batch = toUpdate.slice(i, i + B);
+
+          // Kein echtes bulk-update in PostgREST ohne RPC:
+          // wir machen es als einzelne upserts auf dedupe_key
+          const { error: upErr } = await supabase
+            .from("dealers")
+            .upsert(batch, { onConflict: "dedupe_key" });
+
+          if (upErr) throw new Error(upErr.message);
+        }
+      }
+
+      // 7) Markiere Upload-Run als fertig
+      const { error: finErr } = await supabase
         .from("upload_runs")
         .update({
-          inserted_count: inserted,
-          updated_count: updated,
-          skipped_count: skipped,
-          error_count: 0,
+          inserted_count: toInsert.length,
+          updated_count: toUpdate.length,
+          status: "done",
         })
         .eq("id", uploadRunId);
 
-      setMsg(`✅ Import fertig: inserted ${inserted}, updated ${updated}, skipped ${skipped}. (Run #${uploadRunId})`);
-    } catch (e: any) {
-      setMsg(`❌ Fehler beim Import: ${e?.message ?? String(e)}`);
+      if (finErr) throw new Error(finErr.message);
+
+      setLog((p) => p + `\n✅ Fertig. Upload-Run: ${uploadRunId}`);
+    } catch (err: any) {
+      console.error(err);
+      setLog((p) => p + `\n❌ Import Fehler: ${err?.message ?? String(err)}`);
     } finally {
-      setImporting(false);
+      setLoading(false);
     }
   }
 
   return (
-    <div className="grid" style={{ gap: 16 }}>
-      <div className="card">
-        <div className="cardHeader">
-          <div>
-            <h3 className="cardTitle">Upload</h3>
-            <p className="cardSub">Excel hochladen → Mapping → Import. Duplikate innerhalb der Datei werden automatisch zusammengeführt.</p>
+    <div className="w-full max-w-5xl mx-auto p-4">
+      <div className="rounded-2xl shadow-sm border border-gray-200 p-4 bg-white">
+        <h2 className="text-xl font-semibold mb-2">Upload</h2>
+
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <input type="file" accept=".xlsx,.xls" onChange={onFileChange} />
+
+            <select
+              value={runSource}
+              onChange={(e) => setRunSource(e.target.value)}
+              className="border rounded-lg px-2 py-1"
+              title="Quelle"
+            >
+              <option value="flyer">Flyer</option>
+              <option value="riese_mueller">Riese &amp; Müller</option>
+              <option value="zeg">ZEG</option>
+              <option value="bico">BICO</option>
+              <option value="cube">Cube</option>
+              <option value="kalkhoff">Kalkhoff</option>
+              <option value="sonstige">Sonstige</option>
+            </select>
+
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={overwriteExisting}
+                onChange={(e) => setOverwriteExisting(e.target.checked)}
+              />
+              Bestehende Felder überschreiben
+            </label>
+
+            <button
+              onClick={startImport}
+              disabled={!canImport || loading}
+              className="px-3 py-2 rounded-xl bg-black text-white disabled:opacity-50"
+            >
+              {loading ? "..." : "Import starten"}
+            </button>
           </div>
-          <div className="row">
-            <Link className="pill" href="/">← Zur Karte</Link>
-            <Link className="pill" href="/admin/uploads">Uploads</Link>
-            <Link className="pill" href="/admin/dealers">Dublettenkontrolle</Link>
-          </div>
-        </div>
 
-        <div className="cardBody">
-          <div className="row" style={{ alignItems: "end", flexWrap: "wrap", gap: 12 }}>
-            <div style={{ minWidth: 260 }}>
-              <label><strong>Datei</strong></label>
-              <br />
-              <input type="file" accept=".xlsx,.xls" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
-              {fileName ? <div style={{ marginTop: 6, opacity: 0.7 }}>{fileName}</div> : null}
-            </div>
+          {headers.length > 0 && (
+            <div className="rounded-xl border border-gray-200 p-3 bg-gray-50">
+              <div className="text-sm font-medium mb-2">Mapping</div>
 
-            <div style={{ minWidth: 260 }}>
-              <label><strong>Hersteller / Marke (frei)</strong></label>
-              <br />
-              <input value={brand} onChange={(e) => setBrand(e.target.value)} placeholder='z.B. "BICO"' style={{ width: "100%" }} />
-            </div>
-
-            <div style={{ minWidth: 220 }}>
-              <label><strong>Optionen</strong></label>
-              <div style={{ marginTop: 6 }}>
-                <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input type="checkbox" checked={overwriteExisting} onChange={(e) => setOverwriteExisting(e.target.checked)} />
-                  Vorhandene Felder überschreiben
-                </label>
-                <label style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
-                  <input type="checkbox" checked={rollbackEnabled} onChange={(e) => setRollbackEnabled(e.target.checked)} />
-                  Vorher Rollback (Run löschen)
-                </label>
-                {rollbackEnabled ? (
-                  <div style={{ marginTop: 6 }}>
-                    <select value={rollbackRunId ?? ""} onChange={(e) => setRollbackRunId(e.target.value ? Number(e.target.value) : null)}>
-                      <option value="">Run auswählen…</option>
-                      {runs.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          #{r.id} · {new Date(r.created_at).toLocaleString("de-DE")} · {r.file_name ?? ""} · {r.source ?? ""}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {(
+                  [
+                    ["name", "Name*"],
+                    ["street", "Straße"],
+                    ["zipcode", "PLZ*"],
+                    ["city", "Ort*"],
+                    ["country", "Land"],
+                    ["email", "E-Mail"],
+                    ["phone", "Telefon"],
+                    ["website", "Webseite"],
+                    ["source", "Quelle (optional)"],
+                  ] as const
+                ).map(([k, label]) => (
+                  <label key={k} className="text-sm">
+                    <div className="mb-1">{label}</div>
+                    <select
+                      className="w-full border rounded-lg px-2 py-1"
+                      value={(mapping as any)[k] ?? ""}
+                      onChange={(e) =>
+                        setMapping((m) => ({ ...m, [k]: e.target.value }))
+                      }
+                    >
+                      {headers.map((h) => (
+                        <option key={h} value={h}>
+                          {h}
                         </option>
                       ))}
                     </select>
-                  </div>
-                ) : null}
+                  </label>
+                ))}
               </div>
             </div>
-          </div>
+          )}
 
-          {quality ? (
-            <div className="row" style={{ marginTop: 12, flexWrap: "wrap", gap: 10 }}>
-              <span className="badge">Zeilen: {quality.total}</span>
-              <span className="badge">Name: {quality.hasName}</span>
-              <span className="badge">Straße: {quality.hasStreet}</span>
-              <span className="badge">PLZ: {quality.hasZip}</span>
-              <span className="badge">Ort: {quality.hasCity}</span>
-              <span className="badge">vollständig: {quality.full}</span>
-            </div>
-          ) : null}
-
-          <hr style={{ margin: "16px 0" }} />
-
-          <h4 style={{ marginTop: 0 }}>Mapping</h4>
-          <div className="grid grid3" style={{ gap: 12 }}>
-            {FIELDS.map((f) => (
-              <div key={f.key} className="card" style={{ border: "1px solid #eee" }}>
-                <div className="cardBody">
-                  <div style={{ fontWeight: 700, marginBottom: 8 }}>
-                    {f.label} {f.required ? <span style={{ color: "#b00" }}>*</span> : null}
-                  </div>
-                  <select
-                    value={(mapping as any)[f.key] ?? ""}
-                    onChange={(e) => setMapping((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                    style={{ width: "100%" }}
-                  >
-                    <option value="">—</option>
-                    {headers.map((h) => (
-                      <option key={h} value={h}>
-                        {h}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="row" style={{ marginTop: 14, flexWrap: "wrap", gap: 10 }}>
-            <button className="pill" disabled={!canImport || importing} onClick={doImport}>
-              {importing ? "Import läuft…" : "Import starten"}
-            </button>
-
-            {lastRunId ? <Link className="pill" href="/admin/uploads">Uploads ansehen (Run #{lastRunId}) →</Link> : null}
-            {msg ? <span className={msg.startsWith("❌") ? "badge danger" : "badge"}>{msg}</span> : null}
+          <div className="rounded-xl border border-gray-200 p-3 bg-white">
+            <div className="text-sm font-medium mb-2">Log</div>
+            <pre className="text-xs whitespace-pre-wrap">{log}</pre>
           </div>
         </div>
       </div>
