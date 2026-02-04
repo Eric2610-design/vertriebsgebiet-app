@@ -7,6 +7,7 @@ type Dealer = {
   id: number;
   name: string;
   city: string | null;
+  postal_code: string | null;
   street: string | null;
   source: string | null;
   is_master: boolean;
@@ -15,10 +16,7 @@ type Dealer = {
 };
 
 function norm(v: string | null | undefined) {
-  return (v ?? "")
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, " ");
+  return (v ?? "").toLowerCase().trim().replace(/\s+/g, " ");
 }
 
 export default function AdminDealersPage() {
@@ -27,7 +25,6 @@ export default function AdminDealersPage() {
   const [busyGroupKey, setBusyGroupKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // optional: Toggle
   const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
@@ -40,7 +37,7 @@ export default function AdminDealersPage() {
 
     const { data, error } = await supabase
       .from("dealers")
-      .select("id,name,city,street,source,is_master,duplicate_of,created_at")
+      .select("id,name,city,postal_code,street,source,is_master,duplicate_of,created_at")
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -55,24 +52,18 @@ export default function AdminDealersPage() {
 
   const groups = useMemo(() => {
     const acc = new Map<string, Dealer[]>();
+
     for (const d of dealers) {
-      const key = `${norm(d.name)}|${norm(d.city)}`;
+      const key = `${norm(d.name)}|${norm(d.city)}|${norm(d.postal_code)}`;
       const arr = acc.get(key) ?? [];
       arr.push(d);
       acc.set(key, arr);
     }
 
-    // nur echte Dubletten, außer showAll
-    const arr = Array.from(acc.entries())
+    return Array.from(acc.entries())
       .map(([key, list]) => ({ key, list }))
       .filter(({ list }) => (showAll ? true : list.length > 1))
-      .sort((a, b) => {
-        const aName = a.list[0]?.name ?? "";
-        const bName = b.list[0]?.name ?? "";
-        return aName.localeCompare(bName);
-      });
-
-    return arr;
+      .sort((a, b) => (a.list[0]?.name ?? "").localeCompare(b.list[0]?.name ?? ""));
   }, [dealers, showAll]);
 
   async function setMaster(masterId: number, groupKey: string, group: Dealer[]) {
@@ -82,21 +73,17 @@ export default function AdminDealersPage() {
     try {
       const otherIds = group.filter((d) => d.id !== masterId).map((d) => d.id);
 
-      // 1) Master setzen
       const { error: e1 } = await supabase
         .from("dealers")
         .update({ is_master: true, duplicate_of: null })
         .eq("id", masterId);
-
       if (e1) throw e1;
 
-      // 2) Rest zu Duplikaten
       if (otherIds.length) {
         const { error: e2 } = await supabase
           .from("dealers")
           .update({ is_master: false, duplicate_of: masterId })
           .in("id", otherIds);
-
         if (e2) throw e2;
       }
 
@@ -155,7 +142,9 @@ export default function AdminDealersPage() {
               }}
             >
               <h3 style={{ margin: 0 }}>
-                {master?.name} {master?.city ? `– ${master.city}` : ""}
+                {master?.name}
+                {master?.city ? ` – ${master.city}` : ""}
+                {master?.postal_code ? ` (${master.postal_code})` : ""}
                 <span style={{ fontWeight: 400, opacity: 0.7 }}>
                   {" "}
                   (Datensätze: {list.length})
@@ -166,6 +155,8 @@ export default function AdminDealersPage() {
                 <thead>
                   <tr>
                     <th align="left">ID</th>
+                    <th align="left">PLZ</th>
+                    <th align="left">Stadt</th>
                     <th align="left">Straße</th>
                     <th align="left">Quelle</th>
                     <th align="left">Status</th>
@@ -176,6 +167,8 @@ export default function AdminDealersPage() {
                   {list.map((d) => (
                     <tr key={d.id}>
                       <td>{d.id}</td>
+                      <td>{d.postal_code ?? "-"}</td>
+                      <td>{d.city ?? "-"}</td>
                       <td>{d.street ?? "-"}</td>
                       <td>{d.source ?? "-"}</td>
                       <td>
