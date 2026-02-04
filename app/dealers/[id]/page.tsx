@@ -1,19 +1,30 @@
-import { dealers } from "../../../lib/dealers";
+"use client";
 
-type Props = {
+import { useEffect, useState } from "react";
+import { UploadedDealer } from "../../../components/UploadBox";
+
+export default function DealerDetailPage({
+  params,
+}: {
   params: { id: string };
-};
+}) {
+  const [dealer, setDealer] = useState<UploadedDealer | null>(null);
 
-export default function DealerDetailPage({ params }: Props) {
-  const dealer = dealers.find(
-    (d) => d.id === Number(params.id)
-  );
+  useEffect(() => {
+    const data = (window as any).__DEALERS__ as UploadedDealer[] | undefined;
+    if (!data) return;
+
+    const found = data.find(
+      (d) => d.id === Number(params.id)
+    );
+    setDealer(found ?? null);
+  }, [params.id]);
 
   if (!dealer) {
     return (
       <main style={{ padding: 40 }}>
         <h1>Händler nicht gefunden</h1>
-        <a href="/">← Zurück zur Karte</a>
+        <a href="/">← Zurück</a>
       </main>
     );
   }
