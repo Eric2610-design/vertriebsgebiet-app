@@ -1,49 +1,32 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { UploadedDealer } from "../../../components/UploadBox";
+import { supabase } from "@/lib/supabaseClient";
 
-export default function DealerDetailPage({
-  params,
-}: {
-  params: { id: string };
-}) {
-  const [dealer, setDealer] = useState<UploadedDealer | null>(null);
+function SetMasterButton({ dealerId }: { dealerId: number }) {
+  const setMaster = async () => {
+    const { error } = await supabase.rpc("set_master_dealer", {
+      master_id: dealerId,
+    });
 
-  useEffect(() => {
-    const data = (window as any).__DEALERS__ as UploadedDealer[] | undefined;
-    if (!data) return;
-
-    const found = data.find(
-      (d) => d.id === Number(params.id)
-    );
-    setDealer(found ?? null);
-  }, [params.id]);
-
-  if (!dealer) {
-    return (
-      <main style={{ padding: 40 }}>
-        <h1>Händler nicht gefunden</h1>
-        <a href="/">← Zurück</a>
-      </main>
-    );
-  }
+    if (error) {
+      alert("Fehler: " + error.message);
+    } else {
+      location.reload(); // simpel & sicher
+    }
+  };
 
   return (
-    <main style={{ padding: 40 }}>
-      <h1>{dealer.name}</h1>
-
-      <p>
-        {dealer.street}
-        <br />
-        {dealer.city}
-      </p>
-
-      {dealer.phone && <p>📞 {dealer.phone}</p>}
-      {dealer.email && <p>✉️ {dealer.email}</p>}
-
-      <br />
-      <a href="/">← Zurück zur Karte</a>
-    </main>
+    <button
+      onClick={setMaster}
+      style={{
+        padding: "4px 10px",
+        border: "1px solid #333",
+        cursor: "pointer",
+      }}
+    >
+      Als Master setzen
+    </button>
   );
 }
+
+export default SetMasterButton;
