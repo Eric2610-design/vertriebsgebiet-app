@@ -28,27 +28,27 @@ export default function UploadBox({
       const data = evt.target?.result;
       if (!data) return;
 
-      const workbook = XLSX.read(data, { type: "binary" });
+      // ✅ ArrayBuffer statt BinaryString
+      const workbook = XLSX.read(data, { type: "array" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-
       const rows: any[] = XLSX.utils.sheet_to_json(sheet);
 
-      // ⚠️ Spaltennamen ggf. anpassen!
-      const dealers = rows.map((row, index) => ({
+      const dealers: UploadedDealer[] = rows.map((row, index) => ({
         id: index + 1,
-        name: row.Name,
-        city: row.Ort,
-        street: row.Straße,
-        phone: row.Telefon,
-        email: row.Email,
-        lat: Number(row.Lat),
-        lng: Number(row.Lng),
+        name: row.Name ?? row.name ?? "Unbekannt",
+        city: row.Ort ?? row.city ?? "",
+        street: row.Straße ?? row.street,
+        phone: row.Telefon ?? row.phone,
+        email: row.Email ?? row.email,
+        lat: Number(row.Lat ?? row.lat),
+        lng: Number(row.Lng ?? row.lng),
       }));
 
       onUpload(dealers);
     };
 
-    reader.readAsBinaryString(file);
+    // 🔥 DAS ist der entscheidende Unterschied
+    reader.readAsArrayBuffer(file);
   }
 
   return (
