@@ -17,24 +17,13 @@ function clean(v: any) {
   return s.length ? s : null;
 }
 
-function buildQuery(d: {
-  name: string;
-  street: string | null;
-  zipcode: string | null;
-  city: string | null;
-  country: string | null;
-  postal_code?: string | null;
-}) {
-  // wir nutzen zipcode, fallen aber auf postal_code zurück, falls vorhanden
-  const zip = clean(d.zipcode) ?? clean(d.postal_code) ?? null;
-  const city = clean(d.city);
+function buildQuery(d: any) {
   const street = clean(d.street);
+  const zip = clean(d.zipcode) ?? clean(d.postal_code);
+  const city = clean(d.city);
   const country = clean(d.country) ?? "Deutschland";
 
-  // beste Qualität: Straße + PLZ + Ort + Land
   const primary = [street, [zip, city].filter(Boolean).join(" "), country].filter(Boolean);
-
-  // fallback: Name + PLZ/Ort + Land
   const fallback = [clean(d.name), [zip, city].filter(Boolean).join(" "), country].filter(Boolean);
 
   return (primary.length >= 2 ? primary : fallback).join(", ");
@@ -52,7 +41,6 @@ async function geocodeNominatim(q: string) {
 
   const res = await fetch(url, {
     headers: {
-      // Nominatim erwartet einen identifizierbaren User-Agent
       "User-Agent": "vertriebsgebiet-app (contact: erich.fuhrmann@gmail.com)",
       "Accept-Language": "de",
     },
@@ -65,60 +53,93 @@ async function geocodeNominatim(q: string) {
 
   const lat = Number(data[0].lat);
   const lng = Number(data[0].lon);
-
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
   return { lat, lng };
+}
+
+async function getCounts() {
+  const total = await supabase.from("dealers").select("id", { count: "exact", head: true });
+
+  const withGeo = await supabase
+    .from("dealers")
+    .select("id", { count: "exact", head: true })
+    .not("lat", "is", null)
+    .not("lng", "is", null);
+
+  const missingGeo = await supabase
+    .from("dealers")
+    .select("id", { count: "exact", head: true })
+    .is("lat", null)
+    .is("lng", null);
+
+  const ok = await supabase
+    .from("dealers")
+    .select("id", { count: "exact", head: true })
+    .eq("geocode_status", "ok");
+
+  const notFound = await supabase
+    .from("dealers")
+    .select("id", { count: "exact", head: true })
+    .eq("geocode_status", "not_found");
+
+  const error = await supabase
+    .from("dealers")
+    .select("id", { count: "exact", head: true })
+    .eq("geocode_status", "error");
+
+  return {
+    total: total.count ?? 0,
+    withGeo: withGeo.count ?? 0,
+    missingGeo: missingGeo.count ?? 0,
+    ok: ok.count ?? 0,
+    notFound: notFound.count ?? 0,
+    error: error.count ?? 0,
+  };
 }
 
 /**
  * POST /api/geocode
  * body:
  *  {
- *    limit: number (default 50, max 200),
- *    onlyMissing: boolean (default true),
- *    retryNotFound: boolean (default false)
+ *    batchSize?: number (default 200, max 200)
+ *    onlyMissing?: boolean (default true)
+ *    retryNotFound?: boolean (default false)
+ *    delayMs?: number (default 1100) // rate-limit Nominatim
  *  }
  */
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
 
-  const limit = Math.min(Number(body?.limit ?? 50), 200);
+  const batchSize = Math.min(Number(body?.batchSize ?? 200), 200);
   const onlyMissing = body?.onlyMissing !== false;
   const retryNotFound = body?.retryNotFound === true;
+  const delayMs = Math.max(Number(body?.delayMs ?? 1100), 900);
 
   let q = supabase
     .from("dealers")
     .select("id,name,street,zipcode,postal_code,city,country,lat,lng,geocode_status")
     .order("id", { ascending: true })
-    .limit(limit);
+    .limit(batchSize);
 
-  if (onlyMissing) {
-    q = q.is("lat", null).is("lng", null);
-  }
-
-  if (!retryNotFound) {
-    // wenn schon not_found markiert, überspringen (außer retryNotFound=true)
-    q = q.not("geocode_status", "eq", "not_found");
-  }
+  if (onlyMissing) q = q.is("lat", null).is("lng", null);
+  if (!retryNotFound) q = q.not("geocode_status", "eq", "not_found");
 
   const { data, error } = await q;
-
   if (error) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
   }
 
   const dealers = data ?? [];
   let success = 0;
-  let failed = 0;
   let notFound = 0;
+  let failed = 0;
 
   for (const d of dealers as any[]) {
     const query = buildQuery(d);
 
     try {
-      // rate-limit freundlich: ~1 req/sec
-      await sleep(1100);
-
+      await sleep(delayMs);
       const result = await geocodeNominatim(query);
 
       if (!result) {
@@ -145,7 +166,7 @@ export async function POST(req: Request) {
           geocoded_at: new Date().toISOString(),
         })
         .eq("id", d.id);
-    } catch (e) {
+    } catch {
       failed += 1;
       await supabase
         .from("dealers")
@@ -158,11 +179,14 @@ export async function POST(req: Request) {
     }
   }
 
+  const counts = await getCounts();
+
   return NextResponse.json({
     ok: true,
     processed: dealers.length,
     success,
     notFound,
     failed,
+    counts,
   });
 }
