@@ -1,9 +1,5 @@
-import UploadBox from "../../components/UploadBox";
+import DealerUpload from "@/components/DealerUpload";
 
 export default function UploadPage() {
-  return (
-    <main style={{ padding: 40 }}>
-      <UploadBox />
-    </main>
-  );
+  return <DealerUpload />;
 }
