@@ -13,9 +13,9 @@ type Mapping = {
 };
 
 type Profile = {
-  profileName: string;          // z.B. "Riese & Müller"
-  mapping: Mapping;             // Header-Zuordnung
-  updatedAt: string;            // ISO
+  profileName: string; // z.B. "Riese & Müller"
+  mapping: Mapping; // Header-Zuordnung
+  updatedAt: string; // ISO
 };
 
 const LS_KEY = "dealer_upload_mapping_profiles_v1";
@@ -40,6 +40,58 @@ function safeStr(v: any): string | null {
   if (v === undefined || v === null) return null;
   const s = String(v).trim();
   return s.length ? s : null;
+}
+
+/* ===============================
+   Auto-Mapping (Vorschläge)
+   =============================== */
+function normalizeHeader(h: string) {
+  return h
+    .toLowerCase()
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+const AUTO_FIELDS = {
+  name: [
+    "name",
+    "haendler",
+    "handler",
+    "haendlername",
+    "firmenname",
+    "firma",
+    "unternehmen",
+    "kunde",
+    "shop",
+    "partner",
+    "betrieb",
+    "bezeichnung",
+  ],
+  city: ["ort", "stadt", "city", "town", "plzort", "ortplz"],
+  street: ["strasse", "str", "street", "adresse", "anschrift"],
+} as const;
+
+function autoDetectMapping(headers: string[]): Mapping {
+  const norm = headers.map((h) => ({
+    original: h,
+    n: normalizeHeader(h),
+  }));
+
+  const result: Mapping = {};
+
+  (Object.keys(AUTO_FIELDS) as (keyof typeof AUTO_FIELDS)[]).forEach((field) => {
+    for (const h of norm) {
+      if (AUTO_FIELDS[field].some((k) => h.n.includes(k))) {
+        (result as any)[field] = h.original;
+        break;
+      }
+    }
+  });
+
+  return result;
 }
 
 export default function DealerUpload() {
@@ -94,10 +146,10 @@ export default function DealerUpload() {
       setRows(data);
       setHeaders(hdrs);
 
-      // ✅ Auto-Vorbelegung:
-      // 1) wenn Profil gewählt → Mapping übernehmen
-      // 2) sonst: wenn genau 1 Profil existiert → übernehmen
-      // 3) sonst: leeres Mapping
+      // ✅ Vorbelegung:
+      // 1) wenn Profil gewählt → Profil-Mapping
+      // 2) wenn genau 1 Profil existiert → Profil-Mapping
+      // 3) sonst Auto-Mapping
       if (selectedProfileObj) {
         setMapping(selectedProfileObj.mapping);
         setStatus(`Spalten erkannt – Mapping aus Profil „${selectedProfileObj.profileName}“ geladen`);
@@ -106,8 +158,13 @@ export default function DealerUpload() {
         setMapping(profiles[0].mapping);
         setStatus(`Spalten erkannt – Mapping aus Profil „${profiles[0].profileName}“ geladen`);
       } else {
-        setMapping({});
-        setStatus("Spalten erkannt – bitte Mapping wählen");
+        const auto = autoDetectMapping(hdrs);
+        setMapping(auto);
+        setStatus(
+          auto.name
+            ? "Spalten erkannt – Auto-Vorschläge gesetzt (bitte kurz prüfen)"
+            : "Spalten erkannt – bitte Mapping wählen"
+        );
       }
     } catch (err: any) {
       console.error(err);
@@ -124,9 +181,13 @@ export default function DealerUpload() {
      2️⃣ Profil anwenden
      =============================== */
   function applyProfile(profileName: string) {
-    const p = profiles.find((x) => x.profileName === profileName);
-    if (!p) return;
     setSelectedProfile(profileName);
+    const p = profiles.find((x) => x.profileName === profileName);
+    if (!p) {
+      // Profil "— kein Profil —"
+      setStatus("Profil entfernt");
+      return;
+    }
     setMapping(p.mapping);
     setStatus(`Profil „${profileName}“ angewendet`);
   }
@@ -221,13 +282,17 @@ export default function DealerUpload() {
       <div style={{ marginTop: 16, padding: 16, border: "1px solid #ddd", borderRadius: 8 }}>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
           <div>
-            <label><strong>Excel auswählen</strong></label>
+            <label>
+              <strong>Excel auswählen</strong>
+            </label>
             <br />
             <input type="file" accept=".xlsx,.xls" onChange={handleFile} disabled={busy} />
           </div>
 
           <div>
-            <label><strong>Profil (optional)</strong></label>
+            <label>
+              <strong>Profil (optional)</strong>
+            </label>
             <br />
             <select
               value={selectedProfile}
@@ -244,7 +309,9 @@ export default function DealerUpload() {
           </div>
 
           <div style={{ minWidth: 220 }}>
-            <label><strong>Profil speichern als</strong></label>
+            <label>
+              <strong>Profil speichern als</strong>
+            </label>
             <br />
             <input
               placeholder='z.B. "Riese & Müller"'
@@ -281,9 +348,7 @@ export default function DealerUpload() {
                 <br />
                 <select
                   value={(mapping as any)[f.key] ?? ""}
-                  onChange={(e) =>
-                    setMapping({ ...mapping, [f.key]: e.target.value || undefined })
-                  }
+                  onChange={(e) => setMapping({ ...mapping, [f.key]: e.target.value || undefined })}
                   disabled={busy}
                 >
                   <option value="">— nicht zuordnen —</option>
