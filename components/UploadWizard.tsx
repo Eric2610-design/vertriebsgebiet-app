@@ -102,7 +102,7 @@ export default function UploadWizard() {
   const [mapping, setMapping] = useState<Mapping>(() => guessMapping([]));
   const [importing, setImporting] = useState(false);
   const [msg, setMsg] = useState<string>("");
-  const [brand, setBrand] = useState<string>(""); // freies Textfeld
+  const [brand, setBrand] = useState<string>("");
 
   const [overwriteExisting, setOverwriteExisting] = useState(false);
   const [rollbackEnabled, setRollbackEnabled] = useState(false);
@@ -190,8 +190,6 @@ export default function UploadWizard() {
   }
 
   function compressPrepared(prepared: any[], overwrite: boolean) {
-    // Dedup innerhalb der Datei nach dedupe_key
-    // Merge-Regeln: Felder nicht zerstören (oder overwrite), brands union, source beliebig
     const byKey = new Map<string, any>();
 
     for (const it of prepared) {
@@ -231,7 +229,6 @@ export default function UploadWizard() {
 
     const runBrand = brand.trim() || null;
 
-    // 1) Roh vorbereiten
     const preparedRaw = rows
       .map((r) => {
         const name = pick(r, mapping.name);
@@ -255,7 +252,6 @@ export default function UploadWizard() {
 
           source: runBrand ?? fileName,
           dedupe_key,
-
           brands: runBrand ? [runBrand] : [],
 
           is_master: true,
@@ -265,8 +261,6 @@ export default function UploadWizard() {
       .filter(Boolean) as any[];
 
     const skipped = rows.length - preparedRaw.length;
-
-    // 2) Innerhalb der Datei deduplizieren (Kern-Fix!)
     const prepared = compressPrepared(preparedRaw, overwriteExisting);
 
     try {
@@ -279,7 +273,6 @@ export default function UploadWizard() {
         await rollbackIfNeeded();
       }
 
-      // Upload-Run anlegen
       const { data: run, error: runErr } = await supabase
         .from("upload_runs")
         .insert({
@@ -290,7 +283,7 @@ export default function UploadWizard() {
           updated_count: 0,
           skipped_count: skipped,
           error_count: 0,
-          notes: `Mapping: name=${mapping.name || "-"}, street=${mapping.street || "-"}, zipcode=${mapping.zipcode || "-"}, city=${mapping.city || "-"}; brand=${runBrand ?? "-"}; overwrite=${overwriteExisting ? "yes" : "no"}; dedup_in_file=yes`,
+          notes: `brand=${runBrand ?? "-"}; unique_keys=${prepared.length}; raw_rows=${preparedRaw.length}; dedup_in_file=yes`,
         })
         .select("id")
         .single();
@@ -329,7 +322,7 @@ export default function UploadWizard() {
           if (!ex) {
             toInsert.push({
               ...it,
-              upload_run_id: uploadRunId, // nur für NEU
+              upload_run_id: uploadRunId,
             });
           } else {
             toUpdate.push({
@@ -348,7 +341,6 @@ export default function UploadWizard() {
           }
         }
 
-        // Inserts (kann theoretisch trotzdem 23505 geben, wenn parallel was reinläuft -> fallback)
         let insertedRows: any[] = [];
         if (toInsert.length) {
           const { data: insData, error: insErr } = await supabase
@@ -357,13 +349,11 @@ export default function UploadWizard() {
             .select("id,dedupe_key");
 
           if (insErr) {
-            // Fallback: wenn Duplicate-Key doch auftaucht (Race), dann behandeln wir als Upsert ohne upload_run_id
-            const msg = String(insErr.message ?? "");
-            if (msg.toLowerCase().includes("duplicate") || msg.includes("23505")) {
+            const em = String(insErr.message ?? "").toLowerCase();
+            if (em.includes("duplicate") || em.includes("23505")) {
               const safeUp = toInsert.map(({ upload_run_id, ...rest }) => rest);
               const { error: upErr } = await supabase.from("dealers").upsert(safeUp, { onConflict: "dedupe_key" });
               if (upErr) throw new Error(upErr.message);
-              // in diesem Fall zählen wir konservativ als updated
               updated += toInsert.length;
             } else {
               throw new Error(insErr.message);
@@ -374,14 +364,12 @@ export default function UploadWizard() {
           }
         }
 
-        // Updates (Upsert by dedupe_key)
         if (toUpdate.length) {
           const { error: upErr } = await supabase.from("dealers").upsert(toUpdate, { onConflict: "dedupe_key" });
           if (upErr) throw new Error(upErr.message);
           updated += toUpdate.length;
         }
 
-        // dealer_source_runs (Audit: welche Marke kam in welchem Run)
         const idByKey = new Map<string, number>();
         for (const r of existingRows ?? []) {
           if (r?.dedupe_key && r?.id) idByKey.set(String(r.dedupe_key), Number(r.id));
@@ -406,9 +394,7 @@ export default function UploadWizard() {
           await supabase.from("dealer_source_runs").upsert(sourceRuns, { onConflict: "dealer_id,source,upload_run_id" });
         }
 
-        setMsg(
-          `⏳ Import läuft… ${Math.min(i + chunk.length, prepared.length)} / ${prepared.length} (unique keys) · inserted ${inserted}, updated ${updated}`
-        );
+        setMsg(`⏳ Import… ${Math.min(i + chunk.length, prepared.length)} / ${prepared.length} unique Händler · inserted ${inserted}, updated ${updated}`);
       }
 
       await supabase
@@ -418,13 +404,10 @@ export default function UploadWizard() {
           updated_count: updated,
           skipped_count: skipped,
           error_count: 0,
-          notes: `brand=${runBrand ?? "-"}; unique_keys=${prepared.length}; raw_rows=${preparedRaw.length}; dedup_in_file=yes`,
         })
         .eq("id", uploadRunId);
 
-      setMsg(
-        `✅ Import abgeschlossen: inserted ${inserted}, updated ${updated}, skipped ${skipped}. Datei hatte ${preparedRaw.length} gültige Zeilen, davon ${prepared.length} eindeutige Händler (dedupe_key). (Run #${uploadRunId})`
-      );
+      setMsg(`✅ Import fertig: inserted ${inserted}, updated ${updated}, skipped ${skipped}. (Run #${uploadRunId})`);
     } catch (e: any) {
       setMsg(`❌ Fehler beim Import: ${e?.message ?? String(e)}`);
     } finally {
@@ -438,7 +421,7 @@ export default function UploadWizard() {
         <div className="cardHeader">
           <div>
             <h3 className="cardTitle">Upload</h3>
-            <p className="cardSub">Excel hochladen, Mapping prüfen, Import (Upsert) starten. Duplikate innerhalb der Datei werden automatisch zusammengeführt.</p>
+            <p className="cardSub">Excel hochladen → Mapping → Import. Duplikate innerhalb der Datei werden automatisch zusammengeführt.</p>
           </div>
           <div className="row">
             <Link className="pill" href="/">← Zur Karte</Link>
@@ -459,15 +442,7 @@ export default function UploadWizard() {
             <div style={{ minWidth: 260 }}>
               <label><strong>Hersteller / Marke (frei)</strong></label>
               <br />
-              <input
-                value={brand}
-                onChange={(e) => setBrand(e.target.value)}
-                placeholder='z.B. "BICO" oder "Flyer"'
-                style={{ width: "100%" }}
-              />
-              <div style={{ marginTop: 6, opacity: 0.7 }}>
-                Wird in <code>brands</code> gespeichert und bei gleichen Händlern automatisch zusammengeführt.
-              </div>
+              <input value={brand} onChange={(e) => setBrand(e.target.value)} placeholder='z.B. "BICO"' style={{ width: "100%" }} />
             </div>
 
             <div style={{ minWidth: 220 }}>
@@ -483,10 +458,7 @@ export default function UploadWizard() {
                 </label>
                 {rollbackEnabled ? (
                   <div style={{ marginTop: 6 }}>
-                    <select
-                      value={rollbackRunId ?? ""}
-                      onChange={(e) => setRollbackRunId(e.target.value ? Number(e.target.value) : null)}
-                    >
+                    <select value={rollbackRunId ?? ""} onChange={(e) => setRollbackRunId(e.target.value ? Number(e.target.value) : null)}>
                       <option value="">Run auswählen…</option>
                       {runs.map((r) => (
                         <option key={r.id} value={r.id}>
@@ -507,7 +479,7 @@ export default function UploadWizard() {
               <span className="badge">Straße: {quality.hasStreet}</span>
               <span className="badge">PLZ: {quality.hasZip}</span>
               <span className="badge">Ort: {quality.hasCity}</span>
-              <span className="badge">vollständig (Name+Straße+PLZ+Ort): {quality.full}</span>
+              <span className="badge">vollständig: {quality.full}</span>
             </div>
           ) : null}
 
@@ -543,12 +515,7 @@ export default function UploadWizard() {
               {importing ? "Import läuft…" : "Import starten"}
             </button>
 
-            {lastRunId ? (
-              <Link className="pill" href={`/admin/uploads`}>
-                Uploads ansehen (Run #{lastRunId}) →
-              </Link>
-            ) : null}
-
+            {lastRunId ? <Link className="pill" href="/admin/uploads">Uploads ansehen (Run #{lastRunId}) →</Link> : null}
             {msg ? <span className={msg.startsWith("❌") ? "badge danger" : "badge"}>{msg}</span> : null}
           </div>
         </div>
