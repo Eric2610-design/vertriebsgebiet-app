@@ -7,7 +7,7 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import UploadBox, { UploadedDealer } from "./UploadBox";
 
-// 🔧 Fix für Leaflet Marker Icons (Next.js)
+// 🔧 Leaflet Icon Fix (Next.js)
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl:
@@ -21,14 +21,13 @@ L.Icon.Default.mergeOptions({
 export default function LeafletMap() {
   const [dealers, setDealers] = useState<UploadedDealer[]>([]);
 
-  // 🔁 Übergabe an Detailseiten (temporäre Lösung!)
+  // 🔁 temporäre Übergabe an Detailseiten
   useEffect(() => {
     (window as any).__DEALERS__ = dealers;
   }, [dealers]);
 
   return (
     <>
-      {/* Upload-Overlay */}
       <UploadBox onUpload={setDealers} />
 
       <MapContainer
@@ -61,4 +60,3 @@ export default function LeafletMap() {
     </>
   );
 }
-
