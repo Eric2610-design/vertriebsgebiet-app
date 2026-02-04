@@ -1,92 +1,120 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { supabase } from "@/lib/supabaseClient";
 
-export default function GeocodingPage() {
-  const [counts, setCounts] = useState<{
+type Stats = {
+  counts: {
     total: number;
     withGeo: number;
     missingGeo: number;
+    ok: number;
     notFound: number;
     error: number;
-  } | null>(null);
+    masters: number;
+    approxUniqueByKey: number;
+    sampleSize: number;
+  };
+  perSource: Record<string, number>;
+};
 
-  const [busy, setBusy] = useState(false);
+export default function GeocodingPage() {
+  const [stats, setStats] = useState<Stats | null>(null);
   const [msg, setMsg] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [autoRun, setAutoRun] = useState(false);
 
-  async function loadCounts() {
-    // total
-    const total = await supabase.from("dealers").select("id", { count: "exact", head: true });
-    const withGeo = await supabase
-      .from("dealers")
-      .select("id", { count: "exact", head: true })
-      .not("lat", "is", null)
-      .not("lng", "is", null);
+  const stopRef = useRef(false);
 
-    const missingGeo = await supabase
-      .from("dealers")
-      .select("id", { count: "exact", head: true })
-      .is("lat", null)
-      .is("lng", null);
-
-    const notFound = await supabase
-      .from("dealers")
-      .select("id", { count: "exact", head: true })
-      .eq("geocode_status", "not_found");
-
-    const error = await supabase
-      .from("dealers")
-      .select("id", { count: "exact", head: true })
-      .eq("geocode_status", "error");
-
-    setCounts({
-      total: total.count ?? 0,
-      withGeo: withGeo.count ?? 0,
-      missingGeo: missingGeo.count ?? 0,
-      notFound: notFound.count ?? 0,
-      error: error.count ?? 0,
-    });
+  async function loadStats() {
+    const res = await fetch("/api/dealers/stats", { cache: "no-store" });
+    const json = await res.json();
+    if (!json.ok) {
+      setMsg(`❌ Stats Fehler: ${json.error ?? "unknown"}`);
+      return;
+    }
+    setStats(json);
   }
 
   useEffect(() => {
-    loadCounts();
+    loadStats();
   }, []);
 
-  async function runGeocode(limit: number, retryNotFound = false) {
+  async function runBatch(batchSize: number, retryNotFound = false) {
+    const res = await fetch("/api/geocode", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batchSize, onlyMissing: true, retryNotFound, delayMs: 1100 }),
+    });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error ?? "Geocode error");
+    return json as {
+      processed: number;
+      success: number;
+      notFound: number;
+      failed: number;
+      counts: {
+        total: number;
+        withGeo: number;
+        missingGeo: number;
+        ok: number;
+        notFound: number;
+        error: number;
+      };
+    };
+  }
+
+  async function startAutoAll() {
+    stopRef.current = false;
+    setAutoRun(true);
     setBusy(true);
-    setMsg(`Starte Geocoding (${limit}) …`);
+    setMsg("▶️ Starte Geocode ALL …");
 
     try {
-      const res = await fetch("/api/geocode", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          limit,
-          onlyMissing: true,
-          retryNotFound,
-        }),
-      });
+      // loop, bis missingGeo = 0 oder Stop
+      while (!stopRef.current) {
+        const r = await runBatch(200, false);
 
-      const json = await res.json();
-      if (!json.ok) {
-        setMsg(`❌ ${json.error ?? "Fehler"}`);
-      } else {
         setMsg(
-          `✅ Fertig: processed=${json.processed}, success=${json.success}, notFound=${json.notFound}, failed=${json.failed}`
+          `✅ Batch: processed=${r.processed}, success=${r.success}, notFound=${r.notFound}, failed=${r.failed} | ` +
+            `Remaining missing=${r.counts.missingGeo}`
         );
+
+        // Stats updaten (für Masters/Unique/perSource)
+        await loadStats();
+
+        if (r.counts.missingGeo <= 0) {
+          setMsg("🎉 Fertig! Alle Händler haben Geo (oder sind not_found/error).");
+          break;
+        }
+
+        // Wenn ein Batch 0 processed liefert, sind wir „durch“ (oder alles ist not_found und wird übersprungen)
+        if (r.processed === 0) {
+          setMsg("ℹ️ Keine weiteren Kandidaten im Batch. (Evtl. nur noch not_found/error).");
+          break;
+        }
       }
     } catch (e: any) {
       setMsg(`❌ ${e?.message ?? String(e)}`);
     } finally {
+      setAutoRun(false);
       setBusy(false);
-      await loadCounts();
+      await loadStats();
     }
   }
 
+  function stopAuto() {
+    stopRef.current = true;
+    setMsg("⏸️ Stop angefordert – laufender Batch wird noch beendet …");
+  }
+
+  const c = stats?.counts;
+  const total = c?.total ?? 0;
+  const withGeo = c?.withGeo ?? 0;
+  const pct = total > 0 ? Math.round((withGeo / total) * 100) : 0;
+
   return (
-    <main style={{ padding: 24, maxWidth: 1000 }}>
+    <main style={{ padding: 24, maxWidth: 1100 }}>
       <div style={{ display: "flex", gap: 16, alignItems: "baseline", flexWrap: "wrap" }}>
         <h1 style={{ margin: 0 }}>Geocoding</h1>
         <nav style={{ display: "flex", gap: 12 }}>
@@ -97,39 +125,117 @@ export default function GeocodingPage() {
       </div>
 
       <p style={{ marginTop: 8, opacity: 0.8 }}>
-        Hier werden fehlende Koordinaten (lat/lng) per OpenStreetMap Nominatim ermittelt. Das ist rate-limited – deshalb in
-        Batches laufen lassen.
+        „Geocode ALL“ läuft automatisch in sicheren Batches (Serverless + Rate-Limit kompatibel) und zeigt dir Fortschritt.
       </p>
 
-      <div style={{ marginTop: 16, padding: 14, border: "1px solid #ddd", borderRadius: 10 }}>
-        <h3 style={{ marginTop: 0 }}>Status</h3>
+      <div style={{ marginTop: 14, padding: 14, border: "1px solid #ddd", borderRadius: 10 }}>
+        <h3 style={{ marginTop: 0 }}>Zahlen</h3>
 
-        {!counts ? (
+        {!stats ? (
           <p>Lade …</p>
         ) : (
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            <li>Gesamt: <strong>{counts.total}</strong></li>
-            <li>Mit Geo: <strong>{counts.withGeo}</strong></li>
-            <li>Ohne Geo: <strong>{counts.missingGeo}</strong></li>
-            <li>Not found: <strong>{counts.notFound}</strong></li>
-            <li>Error: <strong>{counts.error}</strong></li>
-          </ul>
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
+              <div style={{ padding: 12, border: "1px solid #eee", borderRadius: 10 }}>
+                <div style={{ opacity: 0.7 }}>Datensätze gesamt</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{c!.total}</div>
+              </div>
+              <div style={{ padding: 12, border: "1px solid #eee", borderRadius: 10 }}>
+                <div style={{ opacity: 0.7 }}>Effektive Händler (Master)</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{c!.masters}</div>
+                <div style={{ opacity: 0.65, fontSize: 12 }}>
+                  (Wenn du Dubletten-Merge nutzt)
+                </div>
+              </div>
+              <div style={{ padding: 12, border: "1px solid #eee", borderRadius: 10 }}>
+                <div style={{ opacity: 0.7 }}>Schätzung „Unique“</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{c!.approxUniqueByKey}</div>
+                <div style={{ opacity: 0.65, fontSize: 12 }}>
+                  aus Name+PLZ+Ort (Sample {c!.sampleSize})
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <div>Geo-Fortschritt: <strong>{withGeo}</strong> / {total} ({pct}%)</div>
+                <div style={{ opacity: 0.75 }}>
+                  missing: {c!.missingGeo} · ok: {c!.ok} · not_found: {c!.notFound} · error: {c!.error}
+                </div>
+              </div>
+
+              <div style={{ height: 10, background: "#eee", borderRadius: 999, overflow: "hidden", marginTop: 8 }}>
+                <div style={{ width: `${pct}%`, height: "100%", background: "#4caf50" }} />
+              </div>
+            </div>
+
+            <details style={{ marginTop: 12 }}>
+              <summary style={{ cursor: "pointer" }}>Uploads nach Quelle (source)</summary>
+              <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                {Object.entries(stats.perSource)
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, 50)
+                  .map(([k, v]) => (
+                    <div key={k} style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ opacity: 0.85 }}>{k}</span>
+                      <strong>{v}</strong>
+                    </div>
+                  ))}
+              </div>
+            </details>
+          </>
         )}
 
         <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-          <button onClick={() => runGeocode(25)} disabled={busy}>
-            Fehlende geocoden (25)
+          {!autoRun ? (
+            <button onClick={startAutoAll} disabled={busy}>
+              Geocode ALL (auto)
+            </button>
+          ) : (
+            <button onClick={stopAuto} disabled={!busy}>
+              Stop
+            </button>
+          )}
+
+          <button
+            onClick={async () => {
+              setBusy(true);
+              setMsg("▶️ Ein Batch (200) …");
+              try {
+                const r = await runBatch(200, false);
+                setMsg(`✅ Batch fertig: processed=${r.processed}, success=${r.success}, notFound=${r.notFound}, failed=${r.failed}`);
+              } catch (e: any) {
+                setMsg(`❌ ${e?.message ?? String(e)}`);
+              } finally {
+                setBusy(false);
+                await loadStats();
+              }
+            }}
+            disabled={busy}
+          >
+            Batch 200
           </button>
-          <button onClick={() => runGeocode(50)} disabled={busy}>
-            Fehlende geocoden (50)
+
+          <button
+            onClick={async () => {
+              setBusy(true);
+              setMsg("▶️ Retry not_found (200) …");
+              try {
+                const r = await runBatch(200, true);
+                setMsg(`✅ Retry fertig: processed=${r.processed}, success=${r.success}, notFound=${r.notFound}, failed=${r.failed}`);
+              } catch (e: any) {
+                setMsg(`❌ ${e?.message ?? String(e)}`);
+              } finally {
+                setBusy(false);
+                await loadStats();
+              }
+            }}
+            disabled={busy}
+          >
+            Retry not_found (200)
           </button>
-          <button onClick={() => runGeocode(100)} disabled={busy}>
-            Fehlende geocoden (100)
-          </button>
-          <button onClick={() => runGeocode(50, true)} disabled={busy}>
-            Retry not_found (50)
-          </button>
-          <button onClick={loadCounts} disabled={busy}>
+
+          <button onClick={loadStats} disabled={busy}>
             Neu laden
           </button>
         </div>
@@ -141,9 +247,8 @@ export default function GeocodingPage() {
         )}
       </div>
 
-      <div style={{ marginTop: 16, opacity: 0.8, fontSize: 13 }}>
-        Tipp: Wenn du 2.000 Händler hast: erst 100er Batches klicken. Danach auf der Karte neu laden – Marker erscheinen
-        sofort, sobald lat/lng da sind.
+      <div style={{ marginTop: 12, opacity: 0.8, fontSize: 13 }}>
+        Tipp: Erst Dubletten mergen → dann geocoden. Dann geocodest du weniger doppelt und die Karte wird sauberer.
       </div>
     </main>
   );
