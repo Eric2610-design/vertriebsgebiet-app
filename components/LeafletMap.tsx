@@ -22,16 +22,15 @@ type Props = {
   dealers: Dealer[];
   center?: [number, number];
   zoom?: number;
-  heightVh?: number; // z.B. 75
+  heightVh?: number;
 };
 
 export default function LeafletMap({
   dealers,
-  center = [51.1657, 10.4515], // Deutschland
+  center = [51.1657, 10.4515],
   zoom = 6,
   heightVh = 75,
 }: Props) {
-  // Fix für Default Marker Icons (sonst "marker" oft unsichtbar in Next/Vercel)
   useEffect(() => {
     const iconRetinaUrl =
       "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png";
@@ -40,7 +39,7 @@ export default function LeafletMap({
     const shadowUrl =
       "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png";
 
-    // @ts-expect-error - Leaflet private API Patch
+    // @ts-expect-error Leaflet private API patch
     delete L.Icon.Default.prototype._getIconUrl;
     L.Icon.Default.mergeOptions({
       iconRetinaUrl,
@@ -49,9 +48,8 @@ export default function LeafletMap({
     });
   }, []);
 
-  // Nur Händler mit Geo
   const geoDealers = useMemo(() => {
-    return dealers.filter(
+    return (dealers ?? []).filter(
       (d) =>
         typeof d.lat === "number" &&
         typeof d.lng === "number" &&
@@ -82,12 +80,19 @@ export default function LeafletMap({
         />
 
         {geoDealers.map((d) => (
-          <Marker key={String(d.id)} position={[d.lat as number, d.lng as number]}>
+          <Marker
+            key={String(d.id)}
+            position={[d.lat as number, d.lng as number]}
+          >
             <Popup>
               <div style={{ minWidth: 220 }}>
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>{d.name}</div>
                 <div style={{ fontSize: 13, lineHeight: 1.35 }}>
-                  {[d.street, [d.zipcode, d.city].filter(Boolean).join(" "), d.country]
+                  {[
+                    d.street,
+                    [d.zipcode, d.city].filter(Boolean).join(" "),
+                    d.country,
+                  ]
                     .filter(Boolean)
                     .join(", ")}
                 </div>
