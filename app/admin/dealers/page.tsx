@@ -19,12 +19,72 @@ function norm(v: string | null | undefined) {
   return (v ?? "").toLowerCase().trim().replace(/\s+/g, " ");
 }
 
+function normalizeNameForFuzzy(v: string | null | undefined) {
+  const s = norm(v)
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    // häufige Rechtsformen/Noise raus
+    .replace(/\b(gmbh|mbh|ag|kg|ohg|gbr|eg|ehg|ek|e\.k\.|ug|ltd|inc)\b/g, "")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return s;
+}
+
+/** Levenshtein distance */
+function levenshtein(a: string, b: string) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+
+  const v0 = new Array(b.length + 1).fill(0);
+  const v1 = new Array(b.length + 1).fill(0);
+
+  for (let i = 0; i <= b.length; i++) v0[i] = i;
+
+  for (let i = 0; i < a.length; i++) {
+    v1[0] = i + 1;
+    for (let j = 0; j < b.length; j++) {
+      const cost = a[i] === b[j] ? 0 : 1;
+      v1[j + 1] = Math.min(
+        v1[j] + 1, // insert
+        v0[j + 1] + 1, // delete
+        v0[j] + cost // replace
+      );
+    }
+    for (let j = 0; j <= b.length; j++) v0[j] = v1[j];
+  }
+
+  return v1[b.length];
+}
+
+function similarity(a: string, b: string) {
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 1;
+  const dist = levenshtein(a, b);
+  return 1 - dist / maxLen;
+}
+
+type Group = {
+  key: string;
+  list: Dealer[];
+  reason: "exact" | "fuzzy";
+  postalCodes: string[]; // normalized non-empty
+  hasPostalWarning: boolean;
+};
+
 export default function AdminDealersPage() {
   const [dealers, setDealers] = useState<Dealer[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyGroupKey, setBusyGroupKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
   const [showAll, setShowAll] = useState(false);
+
+  // Fuzzy Settings (kannst du später in UI packen)
+  const FUZZY_THRESHOLD = 0.86; // 0..1 (höher = strenger)
 
   useEffect(() => {
     loadDealers();
@@ -36,9 +96,7 @@ export default function AdminDealersPage() {
 
     const { data, error } = await supabase
       .from("dealers")
-      .select(
-        "id,name,city,postal_code,street,source,is_master,duplicate_of,created_at"
-      )
+      .select("id,name,city,postal_code,street,source,is_master,duplicate_of,created_at")
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -51,35 +109,133 @@ export default function AdminDealersPage() {
     setLoading(false);
   }
 
-  /**
-   * Gruppierung:
-   * 1) Name + Stadt (bewusst OHNE PLZ)
-   * 2) Innerhalb der Gruppe prüfen wir, ob mehrere PLZ existieren
-   */
-  const groups = useMemo(() => {
-    const acc = new Map<string, Dealer[]>();
+  const groups: Group[] = useMemo(() => {
+    if (!dealers.length) return [];
 
+    // 1) Exakte Gruppen nach Name+Stadt
+    const exactMap = new Map<string, Dealer[]>();
     for (const d of dealers) {
       const key = `${norm(d.name)}|${norm(d.city)}`;
-      const arr = acc.get(key) ?? [];
+      const arr = exactMap.get(key) ?? [];
       arr.push(d);
-      acc.set(key, arr);
+      exactMap.set(key, arr);
     }
 
-    return Array.from(acc.entries())
-      .map(([key, list]) => ({ key, list }))
-      .filter(({ list }) => (showAll ? true : list.length > 1))
-      .sort((a, b) =>
-        (a.list[0]?.name ?? "").localeCompare(b.list[0]?.name ?? "")
-      );
+    const exactGroups: Group[] = Array.from(exactMap.entries()).map(([key, list]) => {
+      const pcs = Array.from(new Set(list.map((x) => norm(x.postal_code)).filter(Boolean)));
+      return {
+        key: `exact:${key}`,
+        list,
+        reason: "exact",
+        postalCodes: pcs,
+        hasPostalWarning: pcs.length > 1,
+      };
+    });
+
+    // Wenn showAll=false: nur Dubletten aus exact nehmen und fuzzy ergänzen
+    // 2) Fuzzy-Gruppen: wir erstellen zusätzliche Gruppen, wenn Namen ähnlich sind,
+    //    aber NICHT bereits in derselben exact-Gruppe sind.
+    //    Restriktion: gleiche PLZ oder gleiche Stadt (fallback).
+    const fuzzyGroups: Group[] = [];
+    const usedPairs = new Set<string>();
+
+    // Index nach Stadt für schnellere Kandidaten
+    const byCity = new Map<string, Dealer[]>();
+    for (const d of dealers) {
+      const c = norm(d.city);
+      const arr = byCity.get(c) ?? [];
+      arr.push(d);
+      byCity.set(c, arr);
+    }
+
+    function pairKey(a: Dealer, b: Dealer) {
+      const x = Math.min(a.id, b.id);
+      const y = Math.max(a.id, b.id);
+      return `${x}:${y}`;
+    }
+
+    // Wir iterieren dealerweise, vergleichen nur innerhalb derselben Stadt (schnell + sinnvoll).
+    for (const d of dealers) {
+      const cKey = norm(d.city);
+      const candidates = byCity.get(cKey) ?? [];
+      const dn = normalizeNameForFuzzy(d.name);
+
+      if (!dn) continue;
+
+      // Kleine Gruppe sammeln, wenn d zu anderen passt
+      const group: Dealer[] = [d];
+
+      for (const o of candidates) {
+        if (o.id === d.id) continue;
+
+        // schon gleiche exact-Gruppe? Dann ignorieren (ist sowieso in exact)
+        const exactA = `${norm(d.name)}|${norm(d.city)}`;
+        const exactB = `${norm(o.name)}|${norm(o.city)}`;
+        if (exactA === exactB) continue;
+
+        const pk = pairKey(d, o);
+        if (usedPairs.has(pk)) continue;
+
+        // PLZ Gate: gleiche PLZ (wenn vorhanden) oder fallback Stadt
+        const plzA = norm(d.postal_code);
+        const plzB = norm(o.postal_code);
+        const plzMatches = plzA && plzB ? plzA === plzB : false;
+        const cityMatches = cKey.length > 0; // gleiche Stadt, weil candidates aus city index
+
+        // Fuzzy-Score
+        const on = normalizeNameForFuzzy(o.name);
+        if (!on) continue;
+
+        const score = similarity(dn, on);
+        if (score >= FUZZY_THRESHOLD && (plzMatches || cityMatches)) {
+          group.push(o);
+          usedPairs.add(pk);
+        }
+      }
+
+      // Fuzzy-Gruppe nur, wenn mehr als 1 Eintrag
+      if (group.length > 1) {
+        // dedupe ids
+        const uniq = Array.from(new Map(group.map((x) => [x.id, x])).values());
+        const pcs = Array.from(new Set(uniq.map((x) => norm(x.postal_code)).filter(Boolean)));
+
+        fuzzyGroups.push({
+          key: `fuzzy:${d.id}:${cKey}`,
+          list: uniq,
+          reason: "fuzzy",
+          postalCodes: pcs,
+          hasPostalWarning: pcs.length > 1,
+        });
+      }
+    }
+
+    // Filter:
+    const combined = [...exactGroups, ...fuzzyGroups]
+      .filter((g) => (showAll ? true : g.list.length > 1))
+      // sinnvolle Sortierung: exact zuerst, dann fuzzy
+      .sort((a, b) => {
+        if (a.reason !== b.reason) return a.reason === "exact" ? -1 : 1;
+        return (a.list[0]?.name ?? "").localeCompare(b.list[0]?.name ?? "");
+      });
+
+    return combined;
   }, [dealers, showAll]);
 
-  async function setMaster(masterId: number, groupKey: string, group: Dealer[]) {
+  async function setMaster(masterId: number, groupKey: string, group: Group) {
+    // ✅ Confirm, wenn PLZ Warnung
+    if (group.hasPostalWarning) {
+      const ok = confirm(
+        `Achtung: Unterschiedliche PLZ in dieser Gruppe (${group.postalCodes.join(", ")}).\n` +
+          `Das sind oft Filialen.\n\nWirklich zusammenführen und ID ${masterId} als Master setzen?`
+      );
+      if (!ok) return;
+    }
+
     setBusyGroupKey(groupKey);
     setError(null);
 
     try {
-      const otherIds = group.filter((d) => d.id !== masterId).map((d) => d.id);
+      const otherIds = group.list.filter((d) => d.id !== masterId).map((d) => d.id);
 
       const { error: e1 } = await supabase
         .from("dealers")
@@ -110,11 +266,7 @@ export default function AdminDealersPage() {
         <h1 style={{ margin: 0 }}>Dublettenkontrolle</h1>
 
         <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input
-            type="checkbox"
-            checked={showAll}
-            onChange={(e) => setShowAll(e.target.checked)}
-          />
+          <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
           Alle Händler anzeigen
         </label>
 
@@ -130,23 +282,16 @@ export default function AdminDealersPage() {
         </p>
       )}
 
-      {!loading && groups.length === 0 && (
-        <p style={{ marginTop: 16 }}>Keine Dubletten gefunden 🎉</p>
-      )}
+      {!loading && groups.length === 0 && <p style={{ marginTop: 16 }}>Keine Gruppen gefunden 🎉</p>}
 
       {!loading &&
-        groups.map(({ key, list }) => {
-          const master = list.find((x) => x.is_master) ?? list[0];
-          const groupBusy = busyGroupKey === key;
-
-          const postalCodes = Array.from(
-            new Set(list.map((d) => norm(d.postal_code)).filter(Boolean))
-          );
-          const hasPostalWarning = postalCodes.length > 1;
+        groups.map((g) => {
+          const master = g.list.find((x) => x.is_master) ?? g.list[0];
+          const groupBusy = busyGroupKey === g.key;
 
           return (
             <section
-              key={key}
+              key={g.key}
               style={{
                 marginTop: 28,
                 paddingTop: 16,
@@ -159,11 +304,11 @@ export default function AdminDealersPage() {
                 {master?.city ? ` – ${master.city}` : ""}
                 <span style={{ fontWeight: 400, opacity: 0.7 }}>
                   {" "}
-                  (Datensätze: {list.length})
+                  (Datensätze: {g.list.length}) · {g.reason === "exact" ? "Exakt" : "Fuzzy"}
                 </span>
               </h3>
 
-              {hasPostalWarning && (
+              {g.hasPostalWarning && (
                 <div
                   style={{
                     marginTop: 8,
@@ -174,9 +319,8 @@ export default function AdminDealersPage() {
                     color: "#664d03",
                   }}
                 >
-                  ⚠️ <strong>Achtung:</strong> Unterschiedliche PLZ innerhalb dieser Gruppe (
-                  {postalCodes.join(", ")}).  
-                  Vermutlich mehrere Filialen – bitte genau prüfen, bevor du zusammenführst.
+                  ⚠️ <strong>Achtung:</strong> Unterschiedliche PLZ in dieser Gruppe ({g.postalCodes.join(", ")}).
+                  Vermutlich mehrere Filialen – bitte prüfen, bevor du zusammenführst.
                 </div>
               )}
 
@@ -193,7 +337,7 @@ export default function AdminDealersPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {list.map((d) => (
+                  {g.list.map((d) => (
                     <tr key={d.id}>
                       <td>{d.id}</td>
                       <td>{d.postal_code ?? "-"}</td>
@@ -201,16 +345,12 @@ export default function AdminDealersPage() {
                       <td>{d.street ?? "-"}</td>
                       <td>{d.source ?? "-"}</td>
                       <td>
-                        {d.is_master ? (
-                          <strong>Master</strong>
-                        ) : (
-                          <>Duplikat → {d.duplicate_of ?? "?"}</>
-                        )}
+                        {d.is_master ? <strong>Master</strong> : <>Duplikat → {d.duplicate_of ?? "?"}</>}
                       </td>
                       <td>
                         {!d.is_master ? (
                           <button
-                            onClick={() => setMaster(d.id, key, list)}
+                            onClick={() => setMaster(d.id, g.key, g)}
                             disabled={groupBusy}
                             style={{ cursor: "pointer", padding: "4px 8px" }}
                           >
