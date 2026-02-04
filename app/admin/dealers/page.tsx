@@ -1,3 +1,6 @@
+"use client";
+
 export default function Test() {
-  return <h1>ADMIN DEALERS TEST</h1>;
+  console.log("ADMIN DEALERS PAGE RENDER");
+  return <h1>ADMIN DEALERS CLIENT</h1>;
 }
