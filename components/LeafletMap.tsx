@@ -1,10 +1,11 @@
 "use client";
 
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import Link from "next/link";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
-// 🔧 Fix für Marker-Icons (Next.js + Leaflet Klassiker)
+// Fix für Marker-Icons
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl:
@@ -15,19 +16,21 @@ L.Icon.Default.mergeOptions({
     "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
 
-// 🧪 Testdaten – später ersetzen wir das durch echte Daten
+// Lokale Testdaten
 const dealers = [
   {
     id: 1,
     name: "Test-Händler Frankfurt",
     lat: 50.11,
     lng: 8.68,
+    city: "Frankfurt am Main",
   },
   {
     id: 2,
     name: "Test-Händler Berlin",
     lat: 52.52,
     lng: 13.405,
+    city: "Berlin",
   },
 ];
 
@@ -43,16 +46,20 @@ export default function LeafletMap() {
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
-      {dealers.map((dealer) => (
-        <Marker
-          key={dealer.id}
-          position={[dealer.lat, dealer.lng]}
-        >
+      {dealers.map((d) => (
+        <Marker key={d.id} position={[d.lat, d.lng]}>
           <Popup>
-            <strong>{dealer.name}</strong>
+            <strong>{d.name}</strong>
+            <br />
+            {d.city}
+            <br />
+            <Link href={`/dealers/${d.id}`}>
+              Details öffnen →
+            </Link>
           </Popup>
         </Marker>
       ))}
     </MapContainer>
   );
 }
+
