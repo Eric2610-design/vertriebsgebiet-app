@@ -94,6 +94,43 @@ async function moveForeignKeys(supabase: ReturnType<typeof supabaseService>, mas
     .in("dealer_id", mergeIds);
   if (mvManErr) throw new Error(`dealer_manufacturers move: ${mvManErr.message}`);
 
+  // 1b) dealer_sources: avoid unique violations on (dealer_id, source, external_id)
+  // Strategy: fetch all dealer_sources for master + mergeIds, delete merge-rows that would collide.
+  try {
+    const { data: dsAll, error: dsErr } = await supabase
+      .from("dealer_sources")
+      .select("id,dealer_id,source,external_id")
+      .in("dealer_id", [masterId, ...mergeIds])
+      .limit(50000);
+
+    if (dsErr && !/relation .* does not exist/i.test(dsErr.message) && !/schema cache/i.test(dsErr.message)) {
+      throw new Error(`dealer_sources: ${dsErr.message}`);
+    }
+
+    if (dsAll && dsAll.length) {
+      const masterPairs = new Set(
+        dsAll
+          .filter((r: any) => r.dealer_id === masterId)
+          .map((r: any) => `${String(r.source ?? "")}::${String(r.external_id ?? "")}`)
+      );
+
+      const dupIds = dsAll
+        .filter((r: any) => r.dealer_id !== masterId)
+        .filter((r: any) => masterPairs.has(`${String(r.source ?? "")}::${String(r.external_id ?? "")}`))
+        .map((r: any) => r.id);
+
+      if (dupIds.length) {
+        const { error: delErr } = await supabase.from("dealer_sources").delete().in("id", dupIds);
+        if (delErr) throw new Error(`dealer_sources dedupe: ${delErr.message}`);
+      }
+    }
+  } catch (e: any) {
+    // If dealer_sources doesn't exist, ignore. Otherwise bubble up.
+    if (!/relation .* does not exist/i.test(String(e?.message ?? "")) && !/Could not find the table/i.test(String(e?.message ?? ""))) {
+      throw e;
+    }
+  }
+
   // 2) all other tables: best-effort (ignore missing tables / schema cache)
   const tables: Array<{ table: string; col: string }> = [
     { table: "dealer_sources", col: "dealer_id" },

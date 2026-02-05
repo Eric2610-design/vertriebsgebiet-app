@@ -197,12 +197,17 @@ export default function MapPage() {
       // rep filter (via territories) — match by PLZ range, not by string compare
       if (repActive.length) {
         const p2 = plz2(d.zip);
-        if (p2 == null) return false;
-        const ok = repActive.some((email) => {
-          const ts = territoriesByRep.get(email) ?? [];
-          return ts.some((t) => p2 >= t.plz2_from && p2 <= t.plz2_to);
-        });
-        if (!ok) return false;
+        // If a rep has no territories assigned yet, we don't want to hide the whole map.
+        // We only apply the filter for reps that actually have at least one territory.
+        const repsWithTerritories = repActive.filter((email) => (territoriesByRep.get(email) ?? []).length > 0);
+        if (repsWithTerritories.length) {
+          if (p2 == null) return false;
+          const ok = repsWithTerritories.some((email) => {
+            const ts = territoriesByRep.get(email) ?? [];
+            return ts.some((t) => p2 >= t.plz2_from && p2 <= t.plz2_to);
+          });
+          if (!ok) return false;
+        }
       }
 
       return true;

@@ -112,7 +112,14 @@ if (coll && coll.length > 0) {
     .update({ norm_name: nn, norm_street: ns, norm_city: nc, identity_key: ik, ...(zip2 && String(d.zip ?? "") !== String(zip2) ? { zip: zip2 } : {}), ...(country2 && !String(d.country ?? "").trim() ? { country: country2 } : {}) })
     .eq("id", d.id);
 
-  if (uerr) return bad(uerr.message, 500);
+  if (uerr) {
+    // If normalization would violate unique constraints, skip the row (it can be merged manually).
+    if (/dealers_norm_unique/i.test(uerr.message) || /duplicate key value/i.test(uerr.message)) {
+      skipped_collisions++;
+      continue;
+    }
+    return bad(uerr.message, 500);
+  }
   if (zip2 && String(d.zip ?? "") !== String(zip2)) zip_padded++;
   if (country2 && !String(d.country ?? "").trim()) country_filled++;
   updated++;

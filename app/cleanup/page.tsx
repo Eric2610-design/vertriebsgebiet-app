@@ -230,9 +230,13 @@ export default function CleanupPage() {
     if (!parentId) return alert("Bitte einen Hauptbetrieb auswählen");
     const picks = branchSelected[group.base_name] ?? {};
     const selectedIds = Object.entries(picks).filter(([, v]) => v).map(([k]) => k);
-    const branchIds = selectedIds.filter((id) => id !== parentId);
+    let branchIds = (explicitBranchIds ?? selectedIds).filter((id) => id !== parentId);
 
-    if (branchIds.length === 0) return alert("Bitte mindestens eine Filiale auswählen");
+    // Bulk actions ("Alle verknüpfen" / "Markierte verknüpfen") should work without manual selection
+    if (branchIds.length === 0 && !explicitBranchIds) {
+      branchIds = group.dealers.map((d) => d.id).filter((id) => id !== parentId);
+    }
+    if (branchIds.length === 0) return alert("Keine Filialen zum Verknüpfen gefunden.");
     const label = (branchLabel[group.base_name] ?? "").trim() || null;
 
     if (!confirm(`Filialen verknüpfen?\n\nHauptbetrieb bleibt: ${group.dealers.find(d=>d.id===parentId)?.name ?? parentId}\nFilialen: ${branchIds.length}`)) return;
