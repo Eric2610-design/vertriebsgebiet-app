@@ -47,6 +47,7 @@ export default function DealerClient({ id }: { id: string }) {
   const [mergeQuery, setMergeQuery] = useState("");
   const [mergeSuggestions, setMergeSuggestions] = useState<any[]>([]);
   const [mergeSelected, setMergeSelected] = useState<Record<string, boolean>>({});
+  const [mergeForce, setMergeForce] = useState(false);
 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [newContact, setNewContact] = useState<{
@@ -251,12 +252,12 @@ export default function DealerClient({ id }: { id: string }) {
       .filter(([, v]) => v)
       .map(([k]) => k);
     if (ids.length === 0) return alert("Bitte mindestens einen Händler auswählen");
-    if (!confirm(`Diese ${ids.length} Händler in "${dealer.dealer.name}" zusammenführen?\n\nWichtig: Merge ist nur möglich, wenn die Adresse exakt gleich ist.`)) return;
+    if (!confirm(`Diese ${ids.length} Händler in "${dealer.dealer.name}" zusammenführen?\n\nHinweis: Wenn Regeln (Straße/Land/PLZ) blockieren, aktiviere unten "Force Merge" oder "Straße ignorieren".`)) return;
     const reason = "manual_dealer_page";
     const res = await fetch(`/api/merge`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ master_id: id, merge_ids: ids, reason }),
+      body: JSON.stringify({ master_id: id, merge_ids: ids, reason, force: mergeForce }),
     });
     const js = await res.json();
     if (!res.ok) return alert(js?.error ?? "Merge fehlgeschlagen");
@@ -634,7 +635,11 @@ export default function DealerClient({ id }: { id: string }) {
                   ))}
                 </div>
               )}
-              <div className="mt-3 flex items-center gap-2">
+                            <div className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+                <input type="checkbox" checked={mergeForce} onChange={(e)=>setMergeForce(e.target.checked)} />
+                <span><b>Force Merge</b> (ignoriert Land/PLZ/Ort &amp; Straße – du entscheidest)</span>
+              </div>
+<div className="mt-3 flex items-center gap-2">
                 <Button onClick={runMerge}>In diesen Händler mergen</Button>
                 <Button variant="secondary" onClick={()=>setMergeSelected({})}>Auswahl löschen</Button>
               </div>

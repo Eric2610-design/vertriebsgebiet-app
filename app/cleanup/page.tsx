@@ -26,11 +26,15 @@ export default function CleanupPage() {
   const [loading, setLoading] = useState(true);
   const [addrGroups, setAddrGroups] = useState<AddrGroup[]>([]);
   const [branchGroups, setBranchGroups] = useState<BranchGroup[]>([]);
+  const [nameGroups, setNameGroups] = useState<any[]>([]);
   const [q, setQ] = useState("");
 
   const [mergeMaster, setMergeMaster] = useState<Record<string, string>>({}); // group.key -> master_id
   const [mergeSelected, setMergeSelected] = useState<Record<string, Record<string, boolean>>>({}); // group.key -> {dealerId: bool}
   const [groupMarked, setGroupMarked] = useState<Record<string, boolean>>({}); // group.key -> bool
+
+  const [nameMaster, setNameMaster] = useState<Record<string, string>>({}); // base_name -> master_id
+  const [nameSelected, setNameSelected] = useState<Record<string, Record<string, boolean>>>({}); // base_name -> {dealerId: bool}
   const [hideLinkedBranches, setHideLinkedBranches] = useState(true);
   const [branchSelected, setBranchSelected] = useState<Record<string, Record<string, boolean>>>({}); // base_name -> {dealerId: bool}
   const [branchLabel, setBranchLabel] = useState<Record<string, string>>({}); // base_name -> label
@@ -61,6 +65,7 @@ export default function CleanupPage() {
       const js = await res.json();
       setAddrGroups(js.address_duplicates ?? []);
       setBranchGroups(js.branch_suggestions ?? []);
+      setNameGroups(js.name_duplicates ?? []);
     } finally {
       setLoading(false);
     }
@@ -85,7 +90,7 @@ export default function CleanupPage() {
 
     if (hideLinkedBranches) {
       groups = groups.filter((g) => {
-        const parentId = mergeMaster[g.base_name] ?? g.suggested_parent_id;
+        const parentId = (mergeMaster[g.base_name] ?? g.suggested_parent_id ?? g.dealers?.[0]?.id) as any;
         // show group only if there is at least one *unlinked* potential branch (excluding parent)
         return g.dealers.some((d) => d.id !== parentId && !d.parent_dealer_id);
       });
@@ -94,6 +99,14 @@ export default function CleanupPage() {
     if (!s) return groups;
     return groups.filter((g) => g.dealers.some((d) => (d.name ?? "").toLowerCase().includes(s)));
   }, [branchGroups, q, hideLinkedBranches, mergeMaster]);
+
+
+  const filteredName = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return nameGroups;
+    return nameGroups.filter((g:any) => (g.base_name ?? "").toLowerCase().includes(s) || (g.dealers ?? []).some((d:any)=>String(d.name??"").toLowerCase().includes(s)));
+  }, [nameGroups, q]);
+
 
   
   function isBranchGroupMarked(base: string) {
@@ -108,7 +121,7 @@ export default function CleanupPage() {
 
     for (let i = 0; i < groups.length; i++) {
       const g = groups[i];
-      const parentId = mergeMaster[g.base_name] ?? g.suggested_parent_id;
+      const parentId = (mergeMaster[g.base_name] ?? g.suggested_parent_id ?? g.dealers?.[0]?.id) as any;
       setProgress(`Filial-Gruppen ${i + 1}/${groups.length}…`);
       await linkBranchGroup(g, parentId);
     }
@@ -123,7 +136,7 @@ export default function CleanupPage() {
 
     for (let i = 0; i < groups.length; i++) {
       const g = groups[i];
-      const parentId = mergeMaster[g.base_name] ?? g.suggested_parent_id;
+      const parentId = (mergeMaster[g.base_name] ?? g.suggested_parent_id ?? g.dealers?.[0]?.id) as any;
       const ids = g.dealers.filter((d) => d.id !== parentId && !d.parent_dealer_id).map((d) => d.id);
       if (ids.length === 0) continue;
       setProgress(`Filial-Gruppen ${i + 1}/${groups.length}…`);
@@ -257,12 +270,39 @@ export default function CleanupPage() {
     setTimeout(() => setProgress(""), 1500);
   }
 
+
+  function setNameSel(groupKey: string, dealerId: string, checked: boolean) {
+    setNameSelected((prev) => {
+      const g = { ...(prev[groupKey] ?? {}) };
+      g[dealerId] = checked;
+      return { ...prev, [groupKey]: g };
+    });
+  }
+
+  async function runNameMerge(groupKey: string) {
+    const masterId = nameMaster[groupKey];
+    if (!masterId) return alert("Bitte zuerst einen Master auswählen.");
+    const ids = Object.entries(nameSelected[groupKey] ?? {}).filter(([,v])=>v).map(([id])=>id).filter((id)=>id!==masterId);
+    if (ids.length === 0) return alert("Bitte mindestens einen Händler zum Mergen auswählen.");
+    if (!confirm(`Force-Merge durchführen?
+
+Master: ${masterId}
+Mergen: ${ids.length} Händler
+
+Hinweis: Dieser Merge ignoriert Adresse/Land/PLZ-Checks.`)) return;
+    const res = await fetch("/api/merge", { method:"POST", headers:{ "content-type":"application/json" }, body: JSON.stringify({ master_id: masterId, merge_ids: ids, reason: "cleanup_name_duplicates", force: true }) });
+    const js = await res.json();
+    if (!res.ok) return alert(js?.error ?? "Merge fehlgeschlagen");
+    await load();
+  }
+
+
 return (
     <main className="mx-auto max-w-6xl px-4 py-6">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Dubletten & Filialen</h1>
-          <p className="text-sm text-slate-600">Zusammenführen nur bei exakt gleicher Adresse. Filialen werden nur gruppiert (kein Merge).</p>
+          <p className="text-sm text-slate-600">Adress-Dubletten werden zusammengeführt. Zusätzlich zeigen wir Namens-Dubletten (manuell/Force-Merge) und Filial-Vorschläge (Verknüpfen, kein Merge).</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Link href="/map"><Button variant="secondary">Zur Karte</Button></Link>
@@ -353,6 +393,62 @@ return (
             </CardContent>
           </Card>
 
+
+          <Card>
+            <CardHeader className="text-sm font-semibold">Namens-Dubletten (manuell / Force Merge)</CardHeader>
+            <CardContent className="space-y-4">
+              {filteredName.length === 0 ? (
+                <div className="text-sm text-slate-600">Keine Namens-Dubletten gefunden.</div>
+              ) : (
+                filteredName.slice(0, 200).map((g:any) => {
+                  const key = g.base_name as string;
+                  const masterId = nameMaster[key] ?? g.suggested_master_id ?? (g.dealers?.[0]?.id ?? "");
+                  return (
+                    <div key={key} className="rounded-xl border border-slate-200 bg-white p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-semibold">{key}</div>
+                          <div className="text-xs text-slate-500">{g.dealers?.length ?? 0} Treffer</div>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="text-slate-600">Master:</span>
+                          <select
+                            className="rounded-md border border-slate-200 bg-white px-2 py-1"
+                            value={masterId}
+                            onChange={(e)=>setNameMaster((s)=>({ ...s, [key]: e.target.value }))}
+                          >
+                            {(g.dealers ?? []).map((d:any)=>(
+                              <option key={d.id} value={d.id}>{d.name}</option>
+                            ))}
+                          </select>
+                          <Button variant="secondary" onClick={()=>runNameMerge(key)}>Force-Merge</Button>
+                        </div>
+                      </div>
+
+                      <div className="mt-2 space-y-2">
+                        {(g.dealers ?? []).map((d:any)=>(
+                          <label key={d.id} className="flex items-start gap-3 rounded-lg border border-slate-100 px-3 py-2 hover:bg-slate-50">
+                            <input
+                              type="checkbox"
+                              className="mt-1"
+                              checked={!!(nameSelected[key]?.[d.id])}
+                              onChange={(e)=>setNameSel(key, d.id, e.target.checked)}
+                            />
+                            <div className="flex-1">
+                              <div className="text-sm font-semibold">{d.name}</div>
+                              <div className="text-xs text-slate-500">{[d.street, `${d.zip ?? ""} ${d.city ?? ""}`, d.country].filter(Boolean).join(", ")}</div>
+                            </div>
+                            <Link className="text-xs text-blue-600 hover:underline" href={`/dealer/${d.id}`} target="_blank">öffnen</Link>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm font-semibold">Filial-Vorschläge (kein Merge)</div>
@@ -404,7 +500,7 @@ return (
 
                     <div className="mt-3 max-h-56 overflow-auto rounded-xl border border-slate-200">
                       {g.dealers.map((d) => {
-                        const parentId = mergeMaster[g.base_name] ?? g.suggested_parent_id;
+                        const parentId = (mergeMaster[g.base_name] ?? g.suggested_parent_id ?? g.dealers?.[0]?.id) as any;
                         return (
                           <label key={d.id} className="flex items-start gap-3 px-3 py-2 hover:bg-slate-50">
                             <input

@@ -172,5 +172,23 @@ export async function GET() {
     .filter(Boolean)
     .slice(0, 200);
 
-  return ok({ address_duplicates, branch_suggestions });
+  
+  // Name duplicates (manual review): group by base name only (address may differ)
+  const nameMap = new Map<string, DealerRow[]>();
+  for (const d of dealerRows) {
+    const bn = baseName(d.name ?? "");
+    if (!bn) continue;
+    const arr = nameMap.get(bn) ?? [];
+    arr.push(d);
+    nameMap.set(bn, arr);
+  }
+  const name_duplicates = Array.from(nameMap.entries())
+    .filter(([_, arr]) => arr.length >= 2)
+    .map(([bn, arr]) => {
+      const sorted = [...arr].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      return { base_name: bn, dealers: sorted, suggested_master_id: sorted[0]?.id };
+    })
+    .slice(0, 200);
+
+  return ok({ address_duplicates, branch_suggestions, name_duplicates });
 }
