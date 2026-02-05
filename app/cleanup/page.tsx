@@ -88,9 +88,17 @@ export default function CleanupPage() {
     const s = q.trim().toLowerCase();
     let groups = branchGroups;
 
+    const pickParentId = (g: BranchGroup): string => {
+      const chosen = mergeMaster[g.base_name];
+      if (chosen) return chosen;
+      if (g.suggested_parent_id) return g.suggested_parent_id;
+      const main = g.dealers.find((d) => !d.parent_dealer_id);
+      return main?.id ?? (g.dealers?.[0]?.id ?? "");
+    };
+
     if (hideLinkedBranches) {
       groups = groups.filter((g) => {
-        const parentId = (mergeMaster[g.base_name] ?? g.suggested_parent_id ?? g.dealers?.[0]?.id) as any;
+        const parentId = pickParentId(g);
         // show group only if there is at least one *unlinked* potential branch (excluding parent)
         return g.dealers.some((d) => d.id !== parentId && !d.parent_dealer_id);
       });
@@ -114,30 +122,37 @@ export default function CleanupPage() {
     return Object.values(sel).some(Boolean);
   }
 
-  async function linkMarkedBranchGroups() {
+  async function linkMarkedBranchGroups(force = false) {
     const groups = filteredBranch.filter((g) => isBranchGroupMarked(g.base_name));
     if (groups.length === 0) return alert("Keine markierten Filial-Gruppen ausgewählt.");
-    if (!confirm(`Markierte Filial-Gruppen verknüpfen?\n\nGruppen: ${groups.length}`)) return;
+    if (!confirm(`Markierte Filial-Gruppen verknüpfen?\n\nGruppen: ${groups.length}${force ? "\n\nFORCE: Verknüpfungen werden überschrieben." : ""}`)) return;
 
     for (let i = 0; i < groups.length; i++) {
       const g = groups[i];
       const parentId = (mergeMaster[g.base_name] ?? g.suggested_parent_id ?? g.dealers?.[0]?.id) as any;
       setProgress(`Filial-Gruppen ${i + 1}/${groups.length}…`);
-      await linkBranchGroup(g, parentId);
+      if (force) {
+        const ids = g.dealers.filter((d) => d.id !== parentId).map((d) => d.id);
+        await linkBranchGroup(g, parentId, ids);
+      } else {
+        await linkBranchGroup(g, parentId);
+      }
     }
     setProgress("");
     await load();
   }
 
-  async function linkAllBranchGroups() {
+  async function linkAllBranchGroups(force = false) {
     const groups = filteredBranch;
     if (groups.length === 0) return alert("Keine Filial-Vorschläge vorhanden.");
-    if (!confirm(`Alle Filial-Gruppen verknüpfen?\n\nGruppen: ${groups.length}`)) return;
+    if (!confirm(`Alle Filial-Gruppen verknüpfen?\n\nGruppen: ${groups.length}${force ? "\n\nFORCE: Verknüpfungen werden überschrieben." : ""}`)) return;
 
     for (let i = 0; i < groups.length; i++) {
       const g = groups[i];
       const parentId = (mergeMaster[g.base_name] ?? g.suggested_parent_id ?? g.dealers?.[0]?.id) as any;
-      const ids = g.dealers.filter((d) => d.id !== parentId && !d.parent_dealer_id).map((d) => d.id);
+      const ids = g.dealers
+        .filter((d) => d.id !== parentId && (force ? true : !d.parent_dealer_id))
+        .map((d) => d.id);
       if (ids.length === 0) continue;
       setProgress(`Filial-Gruppen ${i + 1}/${groups.length}…`);
       await linkBranchGroup(g, parentId, ids);
@@ -226,20 +241,27 @@ export default function CleanupPage() {
     });
   }
 
-  async function linkBranchGroup(group: BranchGroup, parentId: string, explicitBranchIds?: string[]) {
-    if (!parentId) return alert("Bitte einen Hauptbetrieb auswählen");
+  async function linkBranchGroup(group: BranchGroup, parentId?: string | null, explicitBranchIds?: string[]) {
+    const inferredParentId =
+      parentId ||
+      mergeMaster[group.base_name] ||
+      group.suggested_parent_id ||
+      group.dealers.find((d) => !d.parent_dealer_id)?.id ||
+      group.dealers?.[0]?.id;
+
+    if (!inferredParentId) return alert("Bitte einen Hauptbetrieb auswählen");
     const picks = branchSelected[group.base_name] ?? {};
     const selectedIds = Object.entries(picks).filter(([, v]) => v).map(([k]) => k);
-    let branchIds = (explicitBranchIds ?? selectedIds).filter((id) => id !== parentId);
+    let branchIds = (explicitBranchIds ?? selectedIds).filter((id) => id !== inferredParentId);
 
     // Bulk actions ("Alle verknüpfen" / "Markierte verknüpfen") should work without manual selection
     if (branchIds.length === 0 && !explicitBranchIds) {
-      branchIds = group.dealers.map((d) => d.id).filter((id) => id !== parentId);
+      branchIds = group.dealers.map((d) => d.id).filter((id) => id !== inferredParentId);
     }
     if (branchIds.length === 0) return alert("Keine Filialen zum Verknüpfen gefunden.");
     const label = (branchLabel[group.base_name] ?? "").trim() || null;
 
-    if (!confirm(`Filialen verknüpfen?\n\nHauptbetrieb bleibt: ${group.dealers.find(d=>d.id===parentId)?.name ?? parentId}\nFilialen: ${branchIds.length}`)) return;
+    if (!confirm(`Filialen verknüpfen?\n\nHauptbetrieb bleibt: ${group.dealers.find(d=>d.id===inferredParentId)?.name ?? inferredParentId}\nFilialen: ${branchIds.length}`)) return;
 
     setProgress("Verknüpfe Filialen…");
 
@@ -256,7 +278,7 @@ export default function CleanupPage() {
             zip: group.dealers.find(d=>d.id===id)?.zip ?? null,
             city: group.dealers.find(d=>d.id===id)?.city ?? null,
             country: group.dealers.find(d=>d.id===id)?.country ?? null,
-            parent_dealer_id: parentId,
+            parent_dealer_id: inferredParentId,
             branch_label: label,
           },
         }),
@@ -461,8 +483,10 @@ return (
                   <input type="checkbox" checked={hideLinkedBranches} onChange={(e)=>setHideLinkedBranches(e.target.checked)} />
                   verknüpfte ausblenden
                 </label>
-                <Button variant="secondary" onClick={linkMarkedBranchGroups}>Markierte verknüpfen</Button>
-                <Button onClick={linkAllBranchGroups}>Alle verknüpfen</Button>
+                <Button variant="secondary" onClick={() => linkMarkedBranchGroups(false)}>Markierte verknüpfen</Button>
+                <Button variant="secondary" onClick={() => linkMarkedBranchGroups(true)}>Force (markierte)</Button>
+                <Button onClick={() => linkAllBranchGroups(false)}>Alle verknüpfen</Button>
+                <Button variant="secondary" onClick={() => linkAllBranchGroups(true)}>Force (alle)</Button>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -486,7 +510,7 @@ return (
                       <div className="text-xs text-slate-500">Hauptbetrieb auswählen</div>
                       <select
                         className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                        value={mergeMaster[g.base_name] ?? g.suggested_parent_id}
+                        value={mergeMaster[g.base_name] ?? g.suggested_parent_id ?? (g.dealers?.[0]?.id ?? "")}
                         onChange={(e)=>setMergeMaster((p)=>({ ...p, [g.base_name]: e.target.value }))}
                       >
                         {g.dealers.map((d) => (
@@ -528,7 +552,7 @@ return (
 
 
                     <div className="mt-3 flex justify-end">
-                      <Button onClick={() => linkBranchGroup(g, mergeMaster[g.base_name] ?? g.suggested_parent_id)}>Filialen verknüpfen</Button>
+                      <Button onClick={() => linkBranchGroup(g, mergeMaster[g.base_name] ?? g.suggested_parent_id ?? (g.dealers?.[0]?.id ?? null))}>Filialen verknüpfen</Button>
                     </div>
                   </div>
                 ))
