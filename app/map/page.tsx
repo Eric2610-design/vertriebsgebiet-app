@@ -348,7 +348,7 @@ const icon =
     popupAnchor: hasFlyer ? [0, -16] : [0, -36],
   });
       const keys = d.manufacturer_keys ?? [];
-      const labels = keys.map((k) => labelByKey.get(k) ?? k).slice(0, 4);
+      const labels = (keys as string[]).map((k: string) => labelByKey.get(k) ?? k).slice(0, 4);
       const repNames = dealerRepNames.get(d.id) ?? "";
       const popup = `
         <div style="min-width:220px">
