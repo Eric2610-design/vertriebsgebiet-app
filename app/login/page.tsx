@@ -14,3 +14,4 @@ export default async function LoginPage({
   const next = sp?.next ?? "/map";
   return <LoginClient nextPath={next} />;
 }
+
