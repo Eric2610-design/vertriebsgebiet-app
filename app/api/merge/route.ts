@@ -2,7 +2,6 @@ import { z } from "zod";
 import { supabaseService } from "@/lib/supabase";
 import { normText } from "@/lib/normalize";
 
-// Falls du keine util Funktionen hast, hier einfache Response-Helper:
 function json(data: any, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -21,15 +20,6 @@ const Body = z.object({
   merge_ids: z.array(z.string().uuid()).min(1),
   reason: z.string().optional(),
 });
-
-function normCountry(raw: any) {
-  const s = String(raw ?? "").trim().toLowerCase();
-  if (!s) return "";
-  if (["de", "deu", "deutschland", "germany", "ger"].includes(s)) return "DE";
-  if (["at", "aut", "österreich", "osterreich", "austria"].includes(s)) return "AT";
-  if (["ch", "che", "schweiz", "switzerland"].includes(s)) return "CH";
-  return s.toUpperCase();
-}
 
 function normStreetSoft(raw: any) {
   return normText(
@@ -53,7 +43,7 @@ function extractHouseNumber(raw: any) {
 function jaccard(a: string, b: string) {
   const ta = new Set(a.split(" ").filter(Boolean));
   const tb = new Set(b.split(" ").filter(Boolean));
-  if (ta.size === 0 || tb.size === 0) return 0;
+  if (!ta.size || !tb.size) return 0;
   let inter = 0;
   for (const t of ta) if (tb.has(t)) inter++;
   const union = ta.size + tb.size - inter;
@@ -63,16 +53,15 @@ function jaccard(a: string, b: string) {
 function isStreetSimilar(aRaw: any, bRaw: any) {
   const aN = normStreetSoft(aRaw);
   const bN = normStreetSoft(bRaw);
-  if (!aN || !bN) return true; // wenn eins fehlt: nicht blocken
+  if (!aN || !bN) return true;
 
-  // Filial-Schutz über Hausnummer:
+  // Filial-Schutz über Hausnummer (wenn beide vorhanden und unterschiedlich => block)
   const ha = extractHouseNumber(aRaw);
   const hb = extractHouseNumber(bRaw);
   if (ha && hb && ha !== hb) return false;
 
   if (aN === bN) return true;
   if (aN.includes(bN) || bN.includes(aN)) return true;
-
   return jaccard(aN, bN) >= 0.82;
 }
 
@@ -83,7 +72,7 @@ export async function POST(req: Request) {
 
     const masterId = body.master_id;
     const mergeIds = Array.from(new Set(body.merge_ids.filter((x) => x !== masterId)));
-    if (mergeIds.length === 0) return bad("Keine merge_ids übrig (master wurde evtl. mitgegeben).");
+    if (!mergeIds.length) return bad("Keine merge_ids übrig (master wurde evtl. mitgegeben).");
 
     // Händler laden
     const ids = [masterId, ...mergeIds];
@@ -98,28 +87,16 @@ export async function POST(req: Request) {
     const master = dealers.find((d: any) => d.id === masterId);
     if (!master) return bad("Master nicht gefunden.", 400);
 
-    // Soft-Checks: PLZ/Ort/Land/Straße
+    // Soft-Checks: PLZ/Ort/Straße (Land-Block ist bewusst aufgehoben)
     for (const d of dealers as any[]) {
       if (d.id === masterId) continue;
 
-      // PLZ: block nur wenn beide gesetzt & ungleich
       if (master.zip && d.zip && String(master.zip).trim() !== String(d.zip).trim()) {
         return bad("Merge blockiert: PLZ unterschiedlich");
       }
-
-      // City: block nur wenn beide gesetzt & norm ungleich
       if (master.city && d.city && normText(master.city) !== normText(d.city)) {
         return bad("Merge blockiert: Ort unterschiedlich");
       }
-
-      // Country: optional + normalisiert
-      const mc = normCountry(master.country);
-      const dc = normCountry(d.country);
-      if (mc && dc && mc !== dc) {
-        return bad("Merge blockiert: Land unterschiedlich", 400, { master: mc, other: dc });
-      }
-
-      // Straße fuzzy + Hausnummer Schutz
       if (!isStreetSimilar(master.street, d.street)) {
         return bad("Merge blockiert: Straße nicht ähnlich genug (Filial-Schutz)", 400);
       }
@@ -157,32 +134,67 @@ export async function POST(req: Request) {
     }
 
     // -------------------------
-    // 2) dealer_sources dedupe + move  (FIX für deinen Unique Constraint)
+    // 2) dealer_sources dedupe (robust) + move
     // -------------------------
     {
-      const { data: existing, error } = await sb
+      // 2a) Master keys holen
+      const { data: masterSrc, error: mErr } = await sb
         .from("dealer_sources")
         .select("source, source_external_id")
         .eq("dealer_id", masterId);
 
-      if (error) return bad(`dealer_sources existing: ${error.message}`, 500);
+      if (mErr) return bad(`dealer_sources master existing: ${mErr.message}`, 500);
 
-      const pairs = (existing ?? [])
-        .map((x: any) => ({ source: x.source, source_external_id: x.source_external_id }))
-        .filter((x: any) => x.source && x.source_external_id);
+      const masterSet = new Set(
+        (masterSrc ?? [])
+          .filter((x: any) => x.source && x.source_external_id)
+          .map((x: any) => `${x.source}::${x.source_external_id}`)
+      );
 
-      // Lösche beim merge-Kandidaten alle Quellen-Zeilen, die der Master schon hat
-      for (const p of pairs) {
-        const { error: delErr } = await sb
+      // 2b) Alle Sources der mergeIds holen (damit wir Duplikate untereinander finden)
+      const { data: mergeSrc, error: sErr } = await sb
+        .from("dealer_sources")
+        .select("id, dealer_id, source, source_external_id")
+        .in("dealer_id", mergeIds);
+
+      if (sErr) return bad(`dealer_sources merge fetch: ${sErr.message}`, 500);
+
+      // Gruppen nach (source, external) bilden
+      const byKey = new Map<string, any[]>();
+      for (const r of mergeSrc ?? []) {
+        if (!r.source || !r.source_external_id) continue;
+        const k = `${r.source}::${r.source_external_id}`;
+        if (!byKey.has(k)) byKey.set(k, []);
+        byKey.get(k)!.push(r);
+      }
+
+      // 2c) Duplikate innerhalb mergeIds entfernen (nur eine Zeile pro key behalten)
+      const dupIdsToDelete: string[] = [];
+      for (const [, rows] of byKey.entries()) {
+        if (rows.length <= 1) continue;
+        // keep first, delete rest
+        for (let i = 1; i < rows.length; i++) dupIdsToDelete.push(rows[i].id);
+      }
+      if (dupIdsToDelete.length) {
+        const { error: delDupInner } = await sb.from("dealer_sources").delete().in("id", dupIdsToDelete);
+        if (delDupInner) return bad(`dealer_sources inner dedupe: ${delDupInner.message}`, 500);
+      }
+
+      // 2d) Alles löschen, was der Master schon hat (egal bei welchem merge dealer)
+      for (const k of byKey.keys()) {
+        if (!masterSet.has(k)) continue;
+        const [source, source_external_id] = k.split("::");
+        const { error: delAgainstMaster } = await sb
           .from("dealer_sources")
           .delete()
           .in("dealer_id", mergeIds)
-          .eq("source", p.source)
-          .eq("source_external_id", p.source_external_id);
+          .eq("source", source)
+          .eq("source_external_id", source_external_id);
 
-        if (delErr) return bad(`dealer_sources dedupe: ${delErr.message}`, 500);
+        if (delAgainstMaster) return bad(`dealer_sources master dedupe: ${delAgainstMaster.message}`, 500);
       }
 
+      // 2e) Umhängen
       const { error: moveErr } = await sb
         .from("dealer_sources")
         .update({ dealer_id: masterId })
@@ -206,7 +218,6 @@ export async function POST(req: Request) {
     for (const t of moveTables) {
       const { error } = await sb.from(t.table).update({ [t.col]: masterId } as any).in(t.col, mergeIds);
 
-      // Wenn Tabelle nicht existiert / schema cache: ignorieren
       if (
         error &&
         !/Could not find the table/i.test(error.message) &&
@@ -230,7 +241,7 @@ export async function POST(req: Request) {
         })) as any
       );
     } catch {
-      // ignorieren
+      // ignore
     }
 
     // -------------------------
