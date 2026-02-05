@@ -568,7 +568,7 @@ const icon =
                           <div className="text-sm font-semibold">{d.name}</div>
                           <div className="text-xs text-slate-600">{`${d.zip ?? ""} ${d.city ?? ""}`.trim()}</div>
                           <div className="mt-1 flex flex-wrap gap-1">
-                            {keys2.slice(0, 3).map((k) => (
+                            {(keys2 as string[]).slice(0, 3).map((k: string) => (
                               <Badge key={k} tone={k === "flyer" ? "blue" : "slate"} title={k === "flyer" ? "FLYER" : (labelByKey.get(k) ?? k)}>
                                 {k === "flyer" ? (
                                   <img src="/markers/flyer.png" alt="FLYER" className="h-4 w-4" />
