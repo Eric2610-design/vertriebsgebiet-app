@@ -26,7 +26,10 @@ export default function CleanupPage() {
   const [branchGroups, setBranchGroups] = useState<BranchGroup[]>([]);
   const [q, setQ] = useState("");
 
-  const [mergeMaster, setMergeMaster] = useState<Record<string, string>>({}); // group.key -> master_id
+  const [branchParent, setBranchParent] = useState<Record<string, string>>({}); // base_name -> parent_id
+const [branchSelected, setBranchSelected] = useState<Record<string, Record<string, boolean>>>({}); // base_name -> {dealerId: bool}
+const [branchLabel, setBranchLabel] = useState<Record<string, string>>({}); // base_name -> label
+const [mergeMaster, setMergeMaster] = useState<Record<string, string>>({}); // group.key -> master_id
   const [mergeSelected, setMergeSelected] = useState<Record<string, Record<string, boolean>>>({}); // group.key -> {dealerId: bool}
 
   async function load() {
@@ -68,6 +71,34 @@ export default function CleanupPage() {
       g[dealerId] = checked;
       return { ...prev, [groupKey]: g };
     });
+  }
+
+  
+  function setBranchSel(groupKey: string, dealerId: string, checked: boolean) {
+    setBranchSelected((prev) => {
+      const g = { ...(prev[groupKey] ?? {}) };
+      g[dealerId] = checked;
+      return { ...prev, [groupKey]: g };
+    });
+  }
+
+  async function runBranchGroup(g: BranchGroup) {
+    const parent = branchParent[g.base_name] ?? g.suggested_parent_id;
+    const picks = branchSelected[g.base_name] ?? {};
+    const child_ids = Object.entries(picks).filter(([,v])=>v).map(([k])=>k).filter((id)=>id!==parent);
+    if (child_ids.length === 0) return alert("Bitte mindestens eine Filiale auswählen");
+    if (!confirm(`Als Filialen speichern?
+
+Hauptfirma: ${g.dealers.find(d=>d.id===parent)?.name ?? parent}
+Filialen: ${child_ids.length}`)) return;
+    const res = await fetch("/api/branches", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ parent_id: parent, child_ids, branch_label: branchLabel[g.base_name] ?? null }),
+    });
+    const js = await res.json();
+    if (!res.ok) return alert(js?.error ?? "Speichern fehlgeschlagen");
+    await load();
   }
 
   async function runGroupMerge(group: AddrGroup) {
@@ -174,7 +205,7 @@ export default function CleanupPage() {
             <CardHeader className="text-sm font-semibold">Filial-Vorschläge (kein Merge)</CardHeader>
             <CardContent className="space-y-4">
               <div className="text-xs text-slate-500">
-                Diese Vorschläge basieren auf ähnlichem Namen, aber unterschiedlichen Adressen. Du kannst Filialen später direkt in der Händlerseite zuordnen ("Filiale von …").
+                Diese Vorschläge basieren auf ähnlichem Namen, aber unterschiedlichen Adressen. Hier kannst du direkt festlegen, welche Einträge Filialen einer Hauptfirma sind (kein Merge).
               </div>
               {filteredBranch.length === 0 ? (
                 <div className="text-sm text-slate-600">Keine Filial-Vorschläge gefunden.</div>
@@ -187,6 +218,28 @@ export default function CleanupPage() {
                         <div className="text-xs text-slate-500">{g.dealers.length} Einträge</div>
                       </div>
                       <Badge tone="slate">Vorschlag</Badge>
+                    </div>
+                    <div className="mt-3">
+                      <div className="text-xs text-slate-500">Hauptfirma auswählen</div>
+                      <select
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                        value={(branchParent[g.base_name] ?? g.suggested_parent_id)}
+                        onChange={(e)=>setBranchParent((p)=>({ ...p, [g.base_name]: e.target.value }))}
+                      >
+                        {g.dealers.map((d) => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                      </select>
+                      <div className="mt-2 text-xs text-slate-500">Optionaler Filial-Label (wird bei ausgewählten Filialen gesetzt)</div>
+                      <Input
+                        className="mt-1"
+                        placeholder="z.B. Filiale Innenstadt"
+                        value={branchLabel[g.base_name] ?? ""}
+                        onChange={(e)=>setBranchLabel((p)=>({ ...p, [g.base_name]: e.target.value }))}
+                      />
+                      <div className="mt-2">
+                        <Button onClick={()=>runBranchGroup(g)} variant="secondary">Als Filialen speichern</Button>
+                      </div>
                     </div>
                     <div className="mt-3 grid gap-2">
                       {g.dealers.map((d) => (

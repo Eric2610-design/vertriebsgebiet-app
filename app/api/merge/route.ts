@@ -41,7 +41,7 @@ async function moveForeignKeys(supabase: ReturnType<typeof supabaseService>, mas
       .update({ [t.col]: masterId } as any)
       .in(t.col, mergeIds);
     // If the table doesn't exist, ignore (older schema)
-    if (error && !/relation .* does not exist/i.test(error.message)) {
+    if (error && !/relation .* does not exist/i.test(error.message) && !/schema cache/i.test(error.message) && !/Could not find the table/i.test(error.message)) {
       throw new Error(`${t.table}: ${error.message}`);
     }
   }
