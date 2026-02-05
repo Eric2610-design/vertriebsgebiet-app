@@ -224,7 +224,7 @@ const noGeoDealers = useMemo(() => {
 }, [filteredDealers]);
 
 const filteredForList = useMemo(() => {
-  if (!showNoGeoOnly) return filteredForList;
+  if (!showNoGeoOnly) return filteredDealers;
   return noGeoDealers;
 }, [filteredDealers, noGeoDealers, showNoGeoOnly]);
 
