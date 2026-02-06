@@ -4,10 +4,11 @@ import { requireAdmin } from "@/app/api/_admin";
 
 export async function POST(req: Request) {
   try {
-    await requireAdmin();
+    requireAdmin(req);
 
     const body = await req.json().catch(() => ({}));
     const dealer_id = String(body?.dealer_id || "").trim();
+
     const buying_group_key_raw = body?.buying_group_key;
     const buying_group_key =
       buying_group_key_raw == null || buying_group_key_raw === ""
@@ -25,6 +26,8 @@ export async function POST(req: Request) {
     if (error) return bad(error.message, 500);
     return ok({ ok: true });
   } catch (e: any) {
-    return bad(e?.message || "Nicht erlaubt", e?.status || 403);
+    const status = e?.status ?? 403;
+    const msg = e?.message === "admin_only" ? "admin_only" : e?.message || "Fehler";
+    return bad(msg, status);
   }
 }

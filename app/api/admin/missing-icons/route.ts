@@ -2,11 +2,12 @@ import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
 import { requireAdmin } from "@/app/api/_admin";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    await requireAdmin();
+    requireAdmin(req);
 
     const supabase = supabaseService();
+
     const [mRes, bRes] = await Promise.all([
       supabase
         .from("manufacturers")
@@ -30,9 +31,8 @@ export async function GET() {
 
     return ok({ missing_manufacturers, missing_buying_groups });
   } catch (e: any) {
-    return bad(
-      e?.message === "admin_only" ? "admin_only" : e?.message || "Fehler",
-      e?.status || 403
-    );
+    const status = e?.status ?? 403;
+    const msg = e?.message === "admin_only" ? "admin_only" : e?.message || "Fehler";
+    return bad(msg, status);
   }
 }
