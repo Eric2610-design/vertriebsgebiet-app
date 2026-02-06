@@ -2,7 +2,7 @@ import { z } from "zod";
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
 import { normText } from "@/lib/normalize";
-import { getUserContext, isAdminRole, inRanges } from "@/app/api/_userctx";
+import { requireRole, requireUser } from "@/app/api/_auth";
 
 const DealerUpdateSchema = z.object({
   dealer: z.object({
@@ -26,8 +26,7 @@ const DealerUpdateSchema = z.object({
 
 export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) {
   const params = await ctx.params;
-  const userCtx = await getUserContext();
-  const supabase = supabaseService();
+  const { supabase } = await requireUser();
   const { data: dealer, error } = await supabase
     .from("dealers")
     .select("*, zipcode_int")
@@ -36,12 +35,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
   if (error) return bad(error.message, 500);
   if (!dealer) return ok({ dealer: null });
 
-  // Zwischenlösung: restrict dealer details by role + ranges
-  if (!isAdminRole(userCtx.role)) {
-    if (userCtx.role !== "aussendienst" || !inRanges(dealer.country, dealer.zipcode_int, userCtx.ranges)) {
-      return bad("forbidden", 403);
-    }
-  }
+  // RLS entscheidet, ob der User den Dealer sehen darf.
 
   const { data: manufacturers } = await supabase
     .from("dealer_manufacturers")
@@ -80,8 +74,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
 export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const params = await ctx.params;
   try {
-    const userCtx = await getUserContext();
-    if (!isAdminRole(userCtx.role)) return bad("forbidden", 403);
+    await requireRole(["admin", "superadmin"]);
     const supabase = supabaseService();
     const body = DealerUpdateSchema.parse(await req.json());
 
@@ -125,8 +118,7 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
 
 export async function DELETE(_: Request, ctx: { params: Promise<{ id: string }> }) {
   const params = await ctx.params;
-  const userCtx = await getUserContext();
-  if (!isAdminRole(userCtx.role)) return bad("forbidden", 403);
+  await requireRole(["admin", "superadmin"]);
   const supabase = supabaseService();
   const { error } = await supabase.from("dealers").delete().eq("id", params.id);
   if (error) return bad(error.message, 500);

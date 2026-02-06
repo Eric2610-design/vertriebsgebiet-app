@@ -1,50 +1,33 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Button, Card, CardContent, CardHeader, Input, Badge } from "@/components/ui";
 
 export default function LoginClient() {
-  const router = useRouter();
   const sp = useSearchParams();
-  const nextPath = useMemo(() => sp.get("next") || "/map", [sp]);
+  const next = sp.get("next") || "/map";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState("");
 
-  useEffect(() => {
-    const last = window.localStorage.getItem("vt_last_email");
-    if (last) setEmail(last);
-  }, []);
+  const canSubmit = useMemo(() => email.trim().length > 3 && password.trim().length > 0, [email, password]);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setErr(null);
+  async function submit() {
+    if (!canSubmit) return;
+    setErr("");
     setBusy(true);
     try {
-      window.localStorage.setItem("vt_last_email", email);
-
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, next }),
       });
-
-      const txt = await res.text();
-      let payload: any = null;
-      try {
-        payload = JSON.parse(txt);
-      } catch {
-        payload = { ok: res.ok, message: txt };
-      }
-
-      if (!res.ok || !payload?.ok) {
-        setErr(payload?.message || `Login fehlgeschlagen (${res.status})`);
-        return;
-      }
-
-      router.replace(nextPath);
+      const js = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(js?.error || "Login fehlgeschlagen");
+      window.location.href = js?.next || next;
     } catch (e: any) {
       setErr(e?.message || "Login fehlgeschlagen");
     } finally {
@@ -53,113 +36,42 @@ export default function LoginClient() {
   }
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        padding: 16,
-        background: "#f6f7fb",
-      }}
-    >
-      <div
-        style={{
-          width: "min(420px, 100%)",
-          background: "white",
-          borderRadius: 16,
-          padding: 20,
-          boxShadow: "0 10px 30px rgba(0,0,0,.08)",
-        }}
-      >
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 20, fontWeight: 700 }}>Login</div>
-          <div style={{ fontSize: 13, color: "#556" }}>
-            Bitte mit Firmen-E-Mail einloggen.
+    <main className="mx-auto max-w-lg px-4 py-10">
+      <Card>
+        <CardHeader className="flex items-center justify-between">
+          <div>
+            <div className="text-xl font-semibold">Login</div>
+            <div className="text-sm text-slate-600">E-Mail & Passwort (Supabase)</div>
           </div>
-        </div>
+          <Badge tone="slate">{busy ? "…" : "bereit"}</Badge>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {err ? <div className="text-sm text-rose-700">{err}</div> : null}
 
-        <form onSubmit={onSubmit} style={{ display: "grid", gap: 10 }}>
-          <label style={{ display: "grid", gap: 6 }}>
-            <span style={{ fontSize: 12, color: "#334" }}>E-Mail</span>
-            <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              type="email"
-              autoComplete="username"
-              required
-              placeholder="E.fuhrmann@flyer-bikes.com"
-              style={{
-                height: 42,
-                borderRadius: 10,
-                border: "1px solid #d8dbe6",
-                padding: "0 12px",
-                outline: "none",
-              }}
-            />
-          </label>
+          <div>
+            <label className="text-sm text-slate-700">E-Mail</label>
+            <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="z.B. g.backhaus@flyer.ch" autoComplete="username" />
+          </div>
 
-          <label style={{ display: "grid", gap: 6 }}>
-            <span style={{ fontSize: 12, color: "#334" }}>Passwort</span>
-            <input
+          <div>
+            <label className="text-sm text-slate-700">Passwort</label>
+            <Input
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              placeholder="Passwort"
               type="password"
               autoComplete="current-password"
-              required
-              style={{
-                height: 42,
-                borderRadius: 10,
-                border: "1px solid #d8dbe6",
-                padding: "0 12px",
-                outline: "none",
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submit();
               }}
             />
-          </label>
-
-          {err ? (
-            <div
-              style={{
-                background: "#fff1f2",
-                color: "#9f1239",
-                border: "1px solid #fecdd3",
-                padding: 10,
-                borderRadius: 12,
-                fontSize: 13,
-              }}
-            >
-              {err}
-            </div>
-          ) : null}
-
-          <button
-            type="submit"
-            disabled={busy}
-            style={{
-              height: 44,
-              borderRadius: 12,
-              border: "1px solid #1d4ed8",
-              background: busy ? "#93c5fd" : "#2563eb",
-              color: "white",
-              fontWeight: 700,
-              cursor: busy ? "not-allowed" : "pointer",
-            }}
-          >
-            {busy ? "Bitte warten…" : "Einloggen"}
-          </button>
-
-          <div style={{ fontSize: 12, color: "#667", marginTop: 4 }}>
-            Weiterleitung nach:{" "}
-            <span
-              style={{
-                fontFamily:
-                  "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-              }}
-            >
-              {nextPath}
-            </span>
           </div>
-        </form>
-      </div>
+
+          <Button onClick={submit} disabled={!canSubmit || busy}>
+            {busy ? "Login…" : "Login"}
+          </Button>
+        </CardContent>
+      </Card>
     </main>
   );
 }

@@ -1,11 +1,9 @@
-import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
-import { getUserContext, isAdminRole, inRanges } from "@/app/api/_userctx";
+import { requireUser } from "@/app/api/_auth";
 
 export async function GET() {
   try {
-    const ctx = await getUserContext();
-    const supabase = supabaseService();
+    const { supabase } = await requireUser();
 
     const step = 1000;
     let from = 0;
@@ -37,19 +35,12 @@ export async function GET() {
       return { ...d, has_flyer, manufacturer_keys };
     });
 
-    // Zwischenlösung: filter server-side by profile role + ranges.
-    if (isAdminRole(ctx.role)) {
-      return ok({ items });
-    }
-
-    if (ctx.role === "aussendienst") {
-      const filtered = items.filter((d: any) => inRanges(d.country, d.zipcode_int, ctx.ranges));
-      return ok({ items: filtered });
-    }
-
-    // Default: no access to dealers
-    return ok({ items: [] });
+    // RLS macht die Filterung (Admin/SuperAdmin sehen alles, Aussendienst nur sein Gebiet)
+    return ok({ items });
   } catch (e: any) {
+    const msg = String(e?.message || "");
+    if (msg === "unauthorized") return bad("unauthorized", 401);
+    if (msg === "forbidden") return bad("forbidden", 403);
     return bad(e?.message ?? "Failed to load dealers", 500);
   }
 }
