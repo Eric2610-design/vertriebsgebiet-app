@@ -7,7 +7,6 @@ export async function GET(req: Request) {
     requireAdmin(req);
 
     const supabase = supabaseService();
-
     const [mRes, bRes] = await Promise.all([
       supabase
         .from("manufacturers")
@@ -31,8 +30,9 @@ export async function GET(req: Request) {
 
     return ok({ missing_manufacturers, missing_buying_groups });
   } catch (e: any) {
-    const status = e?.status ?? 403;
-    const msg = e?.message === "admin_only" ? "admin_only" : e?.message || "Fehler";
-    return bad(msg, status);
+    return bad(
+      e?.message === "admin_only" ? "admin_only" : e?.message || "Fehler",
+      e?.status || 403
+    );
   }
 }

@@ -1,18 +1,11 @@
 // app/api/_admin.ts
+// Admin check without next/headers cookies() (fixes typing issues where cookies() is Promise)
+
 export function getCookie(req: Request, name: string): string | undefined {
   const raw = req.headers.get("cookie") ?? "";
-  if (!raw) return undefined;
-
-  // simple cookie parsing
-  const parts = raw.split(";").map((p) => p.trim());
-  for (const p of parts) {
-    const idx = p.indexOf("=");
-    if (idx === -1) continue;
-    const k = p.slice(0, idx).trim();
-    const v = p.slice(idx + 1).trim();
-    if (k === name) return decodeURIComponent(v);
-  }
-  return undefined;
+  const re = new RegExp(`(?:^|;\s*)${name}=([^;]*)`);
+  const m = raw.match(re);
+  return m ? decodeURIComponent(m[1]) : undefined;
 }
 
 export function isAdminRequest(req: Request): boolean {

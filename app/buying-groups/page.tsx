@@ -180,7 +180,7 @@ export default function BuyingGroupsPage() {
                     >
                       Zuordnen
                     </Button>
-                    <Button variant="outline" onClick={() => assignDealer(h.id, null)}>
+                    <Button variant="secondary" onClick={() => assignDealer(h.id, null)}>
                       Entfernen
                     </Button>
                   </div>
