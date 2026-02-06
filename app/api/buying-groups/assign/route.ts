@@ -4,11 +4,16 @@ import { requireAdmin } from "@/app/api/_admin";
 
 export async function POST(req: Request) {
   try {
-    requireAdmin();
+    await requireAdmin();
+
     const body = await req.json().catch(() => ({}));
     const dealer_id = String(body?.dealer_id || "").trim();
     const buying_group_key_raw = body?.buying_group_key;
-    const buying_group_key = buying_group_key_raw == null || buying_group_key_raw === "" ? null : String(buying_group_key_raw).trim().toLowerCase();
+    const buying_group_key =
+      buying_group_key_raw == null || buying_group_key_raw === ""
+        ? null
+        : String(buying_group_key_raw).trim().toLowerCase();
+
     if (!dealer_id) return bad("dealer_id fehlt", 400);
 
     const supabase = supabaseService();
