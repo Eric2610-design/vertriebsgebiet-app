@@ -1,5 +1,6 @@
 import { supabaseService } from "@/lib/supabase";
 import { bad, ok } from "@/app/api/_util";
+import { requireAdmin } from "@/app/api/_admin";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -18,6 +19,11 @@ export async function GET(req: Request) {
 }
 
 export async function PUT(req: Request) {
+  try {
+    requireAdmin(req);
+  } catch {
+    return bad("admin_only", 403);
+  }
   const supabase = supabaseService();
   let body: any = null;
   try {

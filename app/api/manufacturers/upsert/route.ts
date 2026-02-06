@@ -21,13 +21,28 @@ export async function POST(req: Request) {
     const key = (body.key?.trim() || slugKey(body.label)).toLowerCase();
     const label = body.label.trim();
 
-    const { data, error } = await supabase
+    const existing = await supabase.from("manufacturers").select("key").eq("key", key).maybeSingle();
+    if (existing.error) return bad(existing.error.message, 500);
+
+    if (!existing.data) {
+      const ins = await supabase
+        .from("manufacturers")
+        .insert({ key, label, icon_missing: true })
+        .select("key,label,icon_missing")
+        .maybeSingle();
+      if (ins.error) return bad(ins.error.message, 500);
+      return ok({ item: ins.data });
+    }
+
+    const upd = await supabase
       .from("manufacturers")
-      .upsert({ key, label }, { onConflict: "key" })
+      .update({ label })
+      .eq("key", key)
       .select("key,label")
       .maybeSingle();
-    if (error) return bad(error.message, 500);
-    return ok({ item: data });
+    if (upd.error) return bad(upd.error.message, 500);
+
+    return ok({ item: upd.data });
   } catch (e: any) {
     return bad(e?.message ?? "Bad request", 400);
   }

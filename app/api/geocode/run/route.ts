@@ -6,20 +6,16 @@ async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-export async function POST(req: Request) {
+export async function POST() {
   const supabase = supabaseService();
 
-  const url = new URL(req.url);
-  const batch = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? "40") || 40));
-
-  // NOTE: Nominatim has usage limits. We keep the batch reasonably small and add delays.
   const { data: dealers, error } = await supabase
     .from("dealers")
     .select("id,street,zip,city,country,lat,lng,geocode_status")
     .is("lat", null)
     .is("lng", null)
     .in("geocode_status", ["missing", "failed"])
-    .limit(batch);
+    .limit(40);
 
   if (error) return bad(error.message, 500);
 
@@ -31,58 +27,30 @@ export async function POST(req: Request) {
     if (!q) continue;
 
     try {
-      const apiUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`;
-      const res = await fetch(apiUrl, {
-        headers: {
-          "user-agent": "vertriebsgebiet-app/1.0 (contact: admin)",
-          accept: "application/json",
-        },
-      });
-      const js = (await res.json().catch(() => [])) as any[];
-      const hit = js?.[0];
-      if (!hit?.lat || !hit?.lon) {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`;
+      const res = await fetch(url, { headers: { "user-agent": "dealer-tool/0.1 (contact: local)" } });
+      const js = await res.json();
+      const best = Array.isArray(js) && js.length ? js[0] : null;
+      if (!best?.lat || !best?.lon) {
+        await supabase.from("dealers").update({ geocode_status: "failed" }).eq("id", d.id);
         failed++;
-        await supabase
-          .from("dealers")
-          .update({ geocode_status: "failed", last_geocoded_at: new Date().toISOString() })
-          .eq("id", d.id);
       } else {
+        await supabase.from("dealers").update({
+          lat: Number(best.lat),
+          lng: Number(best.lon),
+          geocode_status: "ok",
+          last_geocoded_at: new Date().toISOString(),
+        }).eq("id", d.id);
         okCount++;
-        await supabase
-          .from("dealers")
-          .update({
-            lat: Number(hit.lat),
-            lng: Number(hit.lon),
-            geocode_status: "ok",
-            last_geocoded_at: new Date().toISOString(),
-          })
-          .eq("id", d.id);
       }
     } catch {
+      await supabase.from("dealers").update({ geocode_status: "failed" }).eq("id", d.id);
       failed++;
-      await supabase
-        .from("dealers")
-        .update({ geocode_status: "failed", last_geocoded_at: new Date().toISOString() })
-        .eq("id", d.id);
     }
 
-    // be nice to the API
-    await sleep(900);
+    // Respect Nominatim rate limit
+    await sleep(1100);
   }
 
-  // remaining count (approx)
-  const { count } = await supabase
-    .from("dealers")
-    .select("id", { count: "exact", head: true })
-    .is("lat", null)
-    .is("lng", null)
-    .in("geocode_status", ["missing", "failed"]);
-
-  return ok({
-    batch,
-    processed: (dealers ?? []).length,
-    ok: okCount,
-    failed,
-    remaining: count ?? null,
-  });
+  return ok({ ok: okCount, failed });
 }

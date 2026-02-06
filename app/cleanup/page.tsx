@@ -88,17 +88,9 @@ export default function CleanupPage() {
     const s = q.trim().toLowerCase();
     let groups = branchGroups;
 
-    const pickParentId = (g: BranchGroup): string => {
-      const chosen = mergeMaster[g.base_name];
-      if (chosen) return chosen;
-      if (g.suggested_parent_id) return g.suggested_parent_id;
-      const main = g.dealers.find((d) => !d.parent_dealer_id);
-      return main?.id ?? (g.dealers?.[0]?.id ?? "");
-    };
-
     if (hideLinkedBranches) {
       groups = groups.filter((g) => {
-        const parentId = pickParentId(g);
+        const parentId = (mergeMaster[g.base_name] ?? g.suggested_parent_id ?? g.dealers?.[0]?.id) as any;
         // show group only if there is at least one *unlinked* potential branch (excluding parent)
         return g.dealers.some((d) => d.id !== parentId && !d.parent_dealer_id);
       });
@@ -122,44 +114,33 @@ export default function CleanupPage() {
     return Object.values(sel).some(Boolean);
   }
 
-  async function linkMarkedBranchGroups(force = false) {
+  async function linkMarkedBranchGroups() {
     const groups = filteredBranch.filter((g) => isBranchGroupMarked(g.base_name));
     if (groups.length === 0) return alert("Keine markierten Filial-Gruppen ausgewählt.");
-    if (!confirm(`Markierte Filial-Gruppen verknüpfen?\n\nGruppen: ${groups.length}${force ? "\n\nFORCE: Verknüpfungen werden überschrieben." : ""}`)) return;
+    if (!confirm(`Markierte Filial-Gruppen verknüpfen?\n\nGruppen: ${groups.length}`)) return;
 
     for (let i = 0; i < groups.length; i++) {
       const g = groups[i];
       const parentId = (mergeMaster[g.base_name] ?? g.suggested_parent_id ?? g.dealers?.[0]?.id) as any;
       setProgress(`Filial-Gruppen ${i + 1}/${groups.length}…`);
-      if (force) {
-        const ids = g.dealers.filter((d) => d.id !== parentId).map((d) => d.id);
-        await linkBranchGroup(g, parentId, ids, { skipConfirm: true });
-      } else {
-        await linkBranchGroup(g, parentId, undefined, { skipConfirm: true });
-      }
+      await linkBranchGroup(g, parentId);
     }
     setProgress("");
     await load();
   }
 
-  async function linkAllBranchGroups(force = false) {
+  async function linkAllBranchGroups() {
     const groups = filteredBranch;
     if (groups.length === 0) return alert("Keine Filial-Vorschläge vorhanden.");
-    if (!confirm(`Alle Filial-Gruppen verknüpfen?\n\nGruppen: ${groups.length}${force ? "\n\nFORCE: Verknüpfungen werden überschrieben." : ""}`)) return;
+    if (!confirm(`Alle Filial-Gruppen verknüpfen?\n\nGruppen: ${groups.length}`)) return;
 
     for (let i = 0; i < groups.length; i++) {
       const g = groups[i];
-      const parentId = (mergeMaster[g.base_name] ?? g.suggested_parent_id ?? g.dealers.find((d)=>!d.parent_dealer_id)?.id ?? g.dealers?.[0]?.id) as any;
-      // One-click bulk: link *all* possible branches automatically.
-      // - if force=false: only those without parent_dealer_id
-      // - if force=true: override existing links
-      const ids = g.dealers
-        .filter((d) => d.id !== parentId)
-        .filter((d) => (force ? true : !d.parent_dealer_id))
-        .map((d) => d.id);
+      const parentId = (mergeMaster[g.base_name] ?? g.suggested_parent_id ?? g.dealers?.[0]?.id) as any;
+      const ids = g.dealers.filter((d) => d.id !== parentId && !d.parent_dealer_id).map((d) => d.id);
       if (ids.length === 0) continue;
       setProgress(`Filial-Gruppen ${i + 1}/${groups.length}…`);
-      await linkBranchGroup(g, parentId, ids, { skipConfirm: true });
+      await linkBranchGroup(g, parentId, ids);
     }
     setProgress("");
     await load();
@@ -173,7 +154,7 @@ export default function CleanupPage() {
     });
   }
 
-  async function runGroupMerge(group: AddrGroup, force = false) {
+  async function runGroupMerge(group: AddrGroup) {
     const master = mergeMaster[group.key] ?? group.suggested_master_id;
     const picks = mergeSelected[group.key] ?? {};
     const merge_ids = Object.entries(picks)
@@ -181,11 +162,11 @@ export default function CleanupPage() {
       .map(([k]) => k)
       .filter((x) => x !== master);
     if (merge_ids.length === 0) return alert("Bitte mindestens eine Dublette auswählen");
-    if (!confirm(`Zusammenführen?\n\nMaster bleibt: ${group.dealers.find(d=>d.id===master)?.name ?? master}\nDubletten: ${merge_ids.length}\n\n${force ? "FORCE-Merge: ignoriert Land/PLZ/Ort-Checks (Adresse-Gruppe bleibt trotzdem gleich)." : "Nur möglich, wenn Adresse identisch ist."}`)) return;
+    if (!confirm(`Zusammenführen?\n\nMaster bleibt: ${group.dealers.find(d=>d.id===master)?.name ?? master}\nDubletten: ${merge_ids.length}\n\nNur möglich, wenn Adresse identisch ist.`)) return;
     const res = await fetch("/api/merge", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ master_id: master, merge_ids, reason: "cleanup_address_duplicates", force }),
+      body: JSON.stringify({ master_id: master, merge_ids, reason: "cleanup_address_duplicates" }),
     });
     const js = await res.json();
     if (!res.ok) return alert(js?.error ?? "Merge fehlgeschlagen");
@@ -193,9 +174,9 @@ export default function CleanupPage() {
   }
 
   
-  async function bulkMerge(groups: AddrGroup[], label: string, force = false) {
+  async function bulkMerge(groups: AddrGroup[], label: string) {
     if (groups.length === 0) return alert("Keine Gruppen vorhanden");
-    if (!confirm(`${label}?\n\nGruppen: ${groups.length}\n\nPro Gruppe werden alle Einträge (außer Master) zusammengeführt.\n${force ? "FORCE-Merge: ignoriert Land/PLZ/Ort-Checks (Adresse-Gruppe bleibt trotzdem gleich)." : "Merge nur, wenn Adresse identisch ist."}`)) return;
+    if (!confirm(`${label}?\n\nGruppen: ${groups.length}\n\nPro Gruppe werden alle Einträge (außer Master) zusammengeführt.\nMerge nur, wenn Adresse identisch ist.`)) return;
 
     setProgress("Starte Bulk-Merge…");
     let okCount = 0;
@@ -213,7 +194,7 @@ export default function CleanupPage() {
         const res = await fetch("/api/merge", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ master_id: master, merge_ids, reason: "cleanup_bulk_address_duplicates", force }),
+          body: JSON.stringify({ master_id: master, merge_ids, reason: "cleanup_bulk_address_duplicates" }),
         });
         const js = await res.json();
         if (!res.ok) {
@@ -245,34 +226,20 @@ export default function CleanupPage() {
     });
   }
 
-  async function linkBranchGroup(
-    group: BranchGroup,
-    parentId?: string | null,
-    explicitBranchIds?: string[],
-    opts?: { skipConfirm?: boolean }
-  ) {
-    const inferredParentId =
-      parentId ||
-      mergeMaster[group.base_name] ||
-      group.suggested_parent_id ||
-      group.dealers.find((d) => !d.parent_dealer_id)?.id ||
-      group.dealers?.[0]?.id;
-
-    if (!inferredParentId) return alert("Bitte einen Hauptbetrieb auswählen");
+  async function linkBranchGroup(group: BranchGroup, parentId: string, explicitBranchIds?: string[]) {
+    if (!parentId) return alert("Bitte einen Hauptbetrieb auswählen");
     const picks = branchSelected[group.base_name] ?? {};
     const selectedIds = Object.entries(picks).filter(([, v]) => v).map(([k]) => k);
-    let branchIds = (explicitBranchIds ?? selectedIds).filter((id) => id !== inferredParentId);
+    let branchIds = (explicitBranchIds ?? selectedIds).filter((id) => id !== parentId);
 
     // Bulk actions ("Alle verknüpfen" / "Markierte verknüpfen") should work without manual selection
     if (branchIds.length === 0 && !explicitBranchIds) {
-      branchIds = group.dealers.map((d) => d.id).filter((id) => id !== inferredParentId);
+      branchIds = group.dealers.map((d) => d.id).filter((id) => id !== parentId);
     }
     if (branchIds.length === 0) return alert("Keine Filialen zum Verknüpfen gefunden.");
     const label = (branchLabel[group.base_name] ?? "").trim() || null;
 
-    if (!opts?.skipConfirm) {
-      if (!confirm(`Filialen verknüpfen?\n\nHauptbetrieb bleibt: ${group.dealers.find(d=>d.id===inferredParentId)?.name ?? inferredParentId}\nFilialen: ${branchIds.length}`)) return;
-    }
+    if (!confirm(`Filialen verknüpfen?\n\nHauptbetrieb bleibt: ${group.dealers.find(d=>d.id===parentId)?.name ?? parentId}\nFilialen: ${branchIds.length}`)) return;
 
     setProgress("Verknüpfe Filialen…");
 
@@ -289,7 +256,7 @@ export default function CleanupPage() {
             zip: group.dealers.find(d=>d.id===id)?.zip ?? null,
             city: group.dealers.find(d=>d.id===id)?.city ?? null,
             country: group.dealers.find(d=>d.id===id)?.country ?? null,
-            parent_dealer_id: inferredParentId,
+            parent_dealer_id: parentId,
             branch_label: label,
           },
         }),
@@ -314,75 +281,6 @@ export default function CleanupPage() {
       g[dealerId] = checked;
       return { ...prev, [groupKey]: g };
     });
-  }
-
-  function isNameGroupMarked(base: string) {
-    const sel = nameSelected[base] ?? {};
-    return Object.values(sel).some(Boolean);
-  }
-
-  async function bulkForceNameMerge(groups: any[], label: string, onlyMarked: boolean) {
-    if (groups.length === 0) return alert("Keine Namens-Dubletten vorhanden");
-    const markedCount = groups.filter((g: any) => isNameGroupMarked(String(g.base_name ?? ""))).length;
-    if (onlyMarked && markedCount === 0) return alert("Keine markierten Namens-Dubletten ausgewählt");
-
-    if (
-      !confirm(
-        `${label}?\n\nGruppen: ${onlyMarked ? markedCount : groups.length}\n\nHinweis: Force-Merge ignoriert Adresse/Land/PLZ-Checks.\nBitte nur nutzen, wenn du die Dubletten wirklich zusammenführen willst.`
-      )
-    )
-      return;
-
-    setProgress("Starte Force-Merge…");
-    let okCount = 0;
-    let failCount = 0;
-
-    for (let i = 0; i < groups.length; i++) {
-      const g: any = groups[i];
-      const key = String(g.base_name ?? "");
-      if (!key) continue;
-      if (onlyMarked && !isNameGroupMarked(key)) continue;
-
-      const dealers: any[] = g.dealers ?? [];
-      const masterId = nameMaster[key] ?? g.suggested_master_id ?? dealers?.[0]?.id;
-      if (!masterId) continue;
-
-      let mergeIds: string[];
-      if (onlyMarked) {
-        const sel = nameSelected[key] ?? {};
-        mergeIds = Object.entries(sel)
-          .filter(([, v]) => v)
-          .map(([id]) => id)
-          .filter((id) => id !== masterId);
-      } else {
-        mergeIds = dealers.map((d: any) => d.id).filter((id: string) => id !== masterId);
-      }
-
-      if (!mergeIds.length) continue;
-      setProgress(`Force-Merge ${okCount + failCount + 1}/${onlyMarked ? markedCount : groups.length}…`);
-
-      try {
-        const res = await fetch("/api/merge", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ master_id: masterId, merge_ids: mergeIds, reason: "cleanup_name_duplicates_bulk", force: true }),
-        });
-        const js = await res.json();
-        if (!res.ok) {
-          failCount++;
-          console.warn("Bulk force name merge failed", key, js);
-        } else {
-          okCount++;
-        }
-      } catch (e) {
-        failCount++;
-        console.warn("Bulk force name merge error", key, e);
-      }
-    }
-
-    setProgress(`Fertig. OK: ${okCount} · Fehler: ${failCount}`);
-    await load();
-    setTimeout(() => setProgress(""), 2000);
   }
 
   async function runNameMerge(groupKey: string) {
@@ -426,36 +324,6 @@ return (
             disabled={filteredAddr.filter((g)=>groupMarked[g.key]).length === 0 || loading}
           >
             Markierte mergen
-          </Button>
-
-          <Button
-            variant="secondary"
-            onClick={() => bulkMerge(filteredAddr, "Alle Adress-Dubletten FORCE-mergen", true)}
-            disabled={filteredAddr.length === 0 || loading}
-          >
-            Force alle (Adresse)
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => bulkMerge(filteredAddr.filter((g)=>groupMarked[g.key]), "Markierte Adress-Dubletten FORCE-mergen", true)}
-            disabled={filteredAddr.filter((g)=>groupMarked[g.key]).length === 0 || loading}
-          >
-            Force markierte (Adresse)
-          </Button>
-
-          <Button
-            variant="secondary"
-            onClick={() => bulkForceNameMerge(filteredName, "Alle Namens-Dubletten force-mergen", false)}
-            disabled={filteredName.length === 0 || loading}
-          >
-            Force alle (Namen)
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => bulkForceNameMerge(filteredName, "Markierte Namens-Dubletten force-mergen", true)}
-            disabled={filteredName.filter((g:any)=>isNameGroupMarked(String(g.base_name ?? ""))).length === 0 || loading}
-          >
-            Force markierte (Namen)
           </Button>
           {progress ? <Badge tone="slate">{progress}</Badge> : null}
         </div>
@@ -593,10 +461,8 @@ return (
                   <input type="checkbox" checked={hideLinkedBranches} onChange={(e)=>setHideLinkedBranches(e.target.checked)} />
                   verknüpfte ausblenden
                 </label>
-                <Button variant="secondary" onClick={() => linkMarkedBranchGroups(false)}>Markierte verknüpfen</Button>
-                <Button variant="secondary" onClick={() => linkMarkedBranchGroups(true)}>Force (markierte)</Button>
-                <Button onClick={() => linkAllBranchGroups(false)}>Alle verknüpfen</Button>
-                <Button variant="secondary" onClick={() => linkAllBranchGroups(true)}>Force (alle)</Button>
+                <Button variant="secondary" onClick={linkMarkedBranchGroups}>Markierte verknüpfen</Button>
+                <Button onClick={linkAllBranchGroups}>Alle verknüpfen</Button>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -620,7 +486,7 @@ return (
                       <div className="text-xs text-slate-500">Hauptbetrieb auswählen</div>
                       <select
                         className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                        value={mergeMaster[g.base_name] ?? g.suggested_parent_id ?? (g.dealers?.[0]?.id ?? "")}
+                        value={mergeMaster[g.base_name] ?? g.suggested_parent_id}
                         onChange={(e)=>setMergeMaster((p)=>({ ...p, [g.base_name]: e.target.value }))}
                       >
                         {g.dealers.map((d) => (
@@ -662,7 +528,7 @@ return (
 
 
                     <div className="mt-3 flex justify-end">
-                      <Button onClick={() => linkBranchGroup(g, mergeMaster[g.base_name] ?? g.suggested_parent_id ?? (g.dealers?.[0]?.id ?? null))}>Filialen verknüpfen</Button>
+                      <Button onClick={() => linkBranchGroup(g, mergeMaster[g.base_name] ?? g.suggested_parent_id)}>Filialen verknüpfen</Button>
                     </div>
                   </div>
                 ))

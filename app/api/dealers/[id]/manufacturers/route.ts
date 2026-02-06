@@ -2,7 +2,6 @@ import { z } from "zod";
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
 import { normText } from "@/lib/normalize";
-import { requireRole } from "@/app/api/_auth";
 
 const BodySchema = z.object({
   key: z.string().trim().min(1),
@@ -18,7 +17,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const params = await ctx.params;
   try {
     const body = BodySchema.parse(await req.json());
-    await requireRole(["admin", "superadmin"]);
     const supabase = supabaseService();
 
     let key = body.key.trim().toLowerCase();

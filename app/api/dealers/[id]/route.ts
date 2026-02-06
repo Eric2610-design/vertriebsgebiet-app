@@ -2,7 +2,6 @@ import { z } from "zod";
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
 import { normText } from "@/lib/normalize";
-import { requireRole, requireUser } from "@/app/api/_auth";
 
 const DealerUpdateSchema = z.object({
   dealer: z.object({
@@ -26,16 +25,24 @@ const DealerUpdateSchema = z.object({
 
 export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) {
   const params = await ctx.params;
-  const { supabase } = await requireUser();
+  const supabase = supabaseService();
   const { data: dealer, error } = await supabase
     .from("dealers")
-    .select("*, zipcode_int")
+    .select("*")
     .eq("id", params.id)
     .maybeSingle();
   if (error) return bad(error.message, 500);
   if (!dealer) return ok({ dealer: null });
 
-  // RLS entscheidet, ob der User den Dealer sehen darf.
+  let buying_group: any = null;
+  if ((dealer as any).buying_group_key) {
+    const { data: bg } = await supabase
+      .from("buying_groups")
+      .select("key,label,icon_data_url,icon_missing")
+      .eq("key", (dealer as any).buying_group_key)
+      .maybeSingle();
+    buying_group = bg ?? null;
+  }
 
   const { data: manufacturers } = await supabase
     .from("dealer_manufacturers")
@@ -63,6 +70,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
 
   return ok({
     dealer,
+    buying_group,
     manufacturers: (manufacturers ?? []).map((m: any) => ({ key: m.manufacturer_key })),
     // sources are kept server-side, but not shown in UI
     sources: sources ?? [],
@@ -74,7 +82,6 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
 export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const params = await ctx.params;
   try {
-    await requireRole(["admin", "superadmin"]);
     const supabase = supabaseService();
     const body = DealerUpdateSchema.parse(await req.json());
 
@@ -118,7 +125,6 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
 
 export async function DELETE(_: Request, ctx: { params: Promise<{ id: string }> }) {
   const params = await ctx.params;
-  await requireRole(["admin", "superadmin"]);
   const supabase = supabaseService();
   const { error } = await supabase.from("dealers").delete().eq("id", params.id);
   if (error) return bad(error.message, 500);

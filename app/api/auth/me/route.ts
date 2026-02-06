@@ -1,14 +1,11 @@
-import { NextResponse } from "next/server";
-import { getUserClientFromCookies, getRoleForUser, readAuthCookies } from "@/app/api/_auth";
+import { ok } from "@/app/api/_util";
+import { getCookie } from "@/app/api/_admin";
 
-export async function GET() {
-  const { supabase, user } = await getUserClientFromCookies();
-  if (!user) return NextResponse.json({ user: null, role: null }, { status: 200 });
-
-  let role = (await getRoleForUser(user.id)) || null;
-  const c = await readAuthCookies();
-  // fall back to cookie role if table read fails
-  role = role || (c.role as any) || null;
-
-  return NextResponse.json({ user: { id: user.id, email: user.email }, role }, { status: 200 });
+export async function GET(req: Request) {
+  const email = getCookie(req, "vt_email") || null;
+  const role = (getCookie(req, "vt_role") || (getCookie(req, "vt_is_admin") === "1" ? "admin" : "")).toLowerCase();
+  const authed = getCookie(req, "vt_authed") === "1";
+  // Keep legacy field for old clients.
+  const is_admin = role === "admin" || role === "superadmin";
+  return ok({ authed, email, role: role || null, is_admin, user: email ? { email } : null });
 }

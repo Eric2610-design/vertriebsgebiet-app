@@ -6,6 +6,7 @@ import type * as Leaflet from "leaflet";
 
 import { Badge, Button, Card, CardContent, CardHeader, Input } from "@/components/ui";
 import type { Dealer, Manufacturer, Profile, Territory } from "@/lib/types";
+import { BUYING_GROUP_ICON_FALLBACK, MANUFACTURER_ICON_FALLBACK } from "@/lib/pictograms";
 
 type DealerListItem = Dealer & {
   manufacturer_keys?: string[];
@@ -17,10 +18,10 @@ const FALLBACK_LABELS: Record<string, string> = {
   flyer: "FLYER",
   riese_mueller: "Riese & Müller",
   bergamont: "Bergamont",
-  zeg: "ZEG",
-  bico: "BICO",
   kalkhoff: "Kalkhoff",
 };
+
+const BUYING_GROUP_KEYS = new Set(["zeg", "bico", "bikeco"]);
 
 function escapeHtml(s: string) {
   // Avoid String.prototype.replaceAll for compatibility with older browsers.
@@ -77,12 +78,16 @@ export default function MapPage() {
 
   const [dealers, setDealers] = useState<DealerListItem[]>([]);
   const [manufacturers, setManufacturers] = useState<Manufacturer[]>([]);
+  const [buyingGroups, setBuyingGroups] = useState<any[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [territories, setTerritories] = useState<Territory[]>([]);
 
+  // Einkaufsverbände (z.B. ZEG/BICO) sind **keine** Hersteller und sollen nicht in den Hersteller-Filtern auftauchen.
+  const manufacturersForUi = useMemo(() => {
+    return manufacturers.filter((m) => !BUYING_GROUP_KEYS.has(m.key));
+  }, [manufacturers]);
+
   const [q, setQ] = useState("");
-  const [showNoGeoOnly, setShowNoGeoOnly] = useState(false);
-  const [showNoGeoList, setShowNoGeoList] = useState(true);
   const [selectedManu, setSelectedManu] = useState<Record<string, boolean>>({});
   const [selectedReps, setSelectedReps] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
@@ -97,19 +102,22 @@ export default function MapPage() {
       try {
         setMapError(null);
         setLoading(true);
-        const [dRes, mRes, rRes] = await Promise.all([
+        const [dRes, mRes, rRes, bgRes] = await Promise.all([
           fetch("/api/dealers/list", { cache: "no-store" }),
           fetch("/api/manufacturers/list", { cache: "no-store" }),
           fetch("/api/reps/list", { cache: "no-store" }),
+          fetch("/api/buying-groups/list", { cache: "no-store" }),
         ]);
         const dJs = await dRes.json();
         const mJs = await mRes.json();
         const rJs = await rRes.json();
+        const bgJs = await bgRes.json();
         if (cancelled) return;
         setDealers(dJs.items ?? []);
         setManufacturers(mJs.items ?? []);
         setProfiles(rJs.profiles ?? []);
         setTerritories(rJs.territories ?? []);
+        setBuyingGroups(bgJs.items ?? []);
         setMapError(null);
       } catch (e: any) {
         if (!cancelled) setMapError(e?.message ?? "Fehler beim Laden");
@@ -130,6 +138,31 @@ export default function MapPage() {
     return m;
   }, [manufacturers]);
 
+  const manuIconByKey = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const x of manufacturers as any[]) {
+      if (x?.icon_data_url) m.set(x.key, x.icon_data_url);
+    }
+    // fallbacks
+    for (const [k, v] of Object.entries(MANUFACTURER_ICON_FALLBACK)) {
+      if (!m.has(k)) m.set(k, v);
+    }
+    // Flyer uses marker icon
+    m.set("flyer", "/markers/flyer.png");
+    return m;
+  }, [manufacturers]);
+
+  const buyingGroupIconByKey = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const x of buyingGroups as any[]) {
+      if (x?.key && x?.icon_data_url) m.set(x.key, x.icon_data_url);
+    }
+    for (const [k, v] of Object.entries(BUYING_GROUP_ICON_FALLBACK)) {
+      if (!m.has(k)) m.set(k, v);
+    }
+    return m;
+  }, [buyingGroups]);
+
   const repByEmail = useMemo(() => {
     const m = new Map<string, Profile>();
     for (const p of profiles) m.set(p.email, p);
@@ -138,6 +171,7 @@ export default function MapPage() {
 
   const repsList = useMemo(() => {
     return profiles
+      .filter((p) => p.role !== "admin")
       .slice()
       .sort((a, b) => a.display_name.localeCompare(b.display_name))
       .map((p) => ({ email: p.email, name: p.display_name }));
@@ -170,6 +204,8 @@ export default function MapPage() {
       for (const [email, ts] of territoryByRep.entries()) {
         if (ts.some((t) => p2 >= t.plz2_from && p2 <= t.plz2_to)) {
           const prof = repByEmail.get(email);
+          // Admins (z.B. David) sollen nicht als AD bei Händlern angezeigt werden.
+          if (prof?.role === "admin") continue;
           hits.push(prof?.display_name ?? email);
         }
       }
@@ -216,25 +252,12 @@ export default function MapPage() {
     });
   }, [dealers, q, selectedManu, selectedReps, territoriesByRep]);
 
-  
-const noGeoDealers = useMemo(() => {
-  const base = filteredDealers.filter((d) => d.lat == null || d.lng == null);
-  // not in bounds (no coords) – list is global within current filters
-  return base.slice(0, 5000);
-}, [filteredDealers]);
-
-const filteredForList = useMemo(() => {
-  if (!showNoGeoOnly) return filteredDealers;
-  return noGeoDealers;
-}, [filteredDealers, noGeoDealers, showNoGeoOnly]);
-
-const visibleWithGeo = useMemo(() => {
-    if (showNoGeoOnly) return [] as any[];
+  const visibleWithGeo = useMemo(() => {
     return filteredDealers
       .filter((d) => inBounds(d, bounds))
       .filter((d) => d.lat != null && d.lng != null)
       .slice(0, 2000);
-  }, [filteredDealers, bounds, showNoGeoOnly]);
+  }, [filteredDealers, bounds]);
 
   const initMap = () => {
     if (!leafletReady) return;
@@ -348,14 +371,27 @@ const icon =
     popupAnchor: hasFlyer ? [0, -16] : [0, -36],
   });
       const keys = d.manufacturer_keys ?? [];
-      const labels = (keys as string[]).map((k: string) => labelByKey.get(k) ?? k).slice(0, 4);
+      const bgKey = (d as any).buying_group_key as string | undefined;
+      const bgIcon = bgKey ? (buyingGroupIconByKey.get(bgKey) || null) : null;
+      const icons = keys
+        .slice(0, 6)
+        .map((k) => {
+          const src = k === "flyer" ? "/markers/flyer.png" : (MANUFACTURER_ICON_FALLBACK[k] || null);
+          const title = labelByKey.get(k) ?? k;
+          if (!src) return escapeHtml(title);
+          return `<img src="${src}" title="${escapeHtml(title)}" style="width:14px;height:14px;vertical-align:-2px;border-radius:4px;margin-left:2px;object-fit:contain" />`;
+        })
+        .join(" ");
       const repNames = dealerRepNames.get(d.id) ?? "";
       const popup = `
         <div style="min-width:220px">
-          <div style="font-weight:700;margin-bottom:2px">${escapeHtml(d.name ?? "")}</div>
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+            <div style="font-weight:700;margin-bottom:2px">${escapeHtml(d.name ?? "")}</div>
+            ${bgIcon ? `<img src="${bgIcon}" title="Einkaufsverband" style="width:18px;height:18px;border-radius:4px;object-fit:contain" />` : ""}
+          </div>
           <div style="font-size:12px;color:#475569">${escapeHtml(`${d.street ?? ""}`.trim())}</div>
           <div style="font-size:12px;color:#475569">${escapeHtml(`${d.zip ?? ""} ${d.city ?? ""}`.trim())}</div>
-          <div style="margin-top:6px;font-size:12px">${labels.length ? `<b>Marken:</b> ${labels.map(l=> l==="FLYER" ? `<img src="/markers/flyer.png" style="width:14px;height:14px;vertical-align:-2px;border-radius:999px;margin-left:2px" />` : escapeHtml(l)).join(", ")}` : ""}</div>
+          <div style="margin-top:6px;font-size:12px">${icons ? `<b>Marken:</b> ${icons}` : ""}</div>
           ${repNames ? `<div style="margin-top:4px;font-size:12px"><b>AD:</b> ${escapeHtml(repNames)}</div>` : ""}
           <div style="margin-top:8px"><a href="/dealer/${encodeURIComponent(d.id)}" style="color:#2563eb;text-decoration:underline">Details öffnen</a></div>
         </div>
@@ -372,7 +408,7 @@ const icon =
         markersRef.current.set(d.id, m);
       }
     }
-  }, [leafletReady, visibleWithGeo, labelByKey, dealerRepNames, flyerIcon, defaultIcon]);
+  }, [leafletReady, visibleWithGeo, labelByKey, dealerRepNames, flyerIcon, defaultIcon, buyingGroupIconByKey]);
 
   const runGeocode = async () => {
     try {
@@ -415,14 +451,14 @@ const icon =
 
   // initialise selectedManu lazily from manufacturers
   useEffect(() => {
-    if (!manufacturers.length) return;
+    if (!manufacturersForUi.length) return;
     setSelectedManu((prev) => {
       if (Object.keys(prev).length) return prev;
       const next: Record<string, boolean> = {};
-      for (const m of manufacturers) next[m.key] = true;
+      for (const m of manufacturersForUi) next[m.key] = true;
       return next;
     });
-  }, [manufacturers]);
+  }, [manufacturersForUi]);
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-6">
@@ -442,26 +478,6 @@ const icon =
         <div className="flex flex-col gap-3 md:flex-row md:items-center">
           <div className="flex-1">
             <Input placeholder="Suche (Name/Ort/PLZ)" value={q} onChange={(e) => setQ(e.target.value)} />
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge tone="slate">Marker: {visibleWithGeo.length}</Badge>
-            <Badge tone={noGeoDealers.length ? "amber" : "slate"}>Ohne Geocode: {noGeoDealers.length}</Badge>
-            <Button variant="secondary" onClick={() => setShowNoGeoOnly((v) => !v)}>
-              {showNoGeoOnly ? "Alle anzeigen" : "Nur ohne Geocode"}
-            </Button>
-            <Button variant="secondary" onClick={() => setShowNoGeoList((v) => !v)}>
-              {showNoGeoList ? "Ohne‑Geocode‑Liste aus" : "Ohne‑Geocode‑Liste an"}
-            </Button>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge tone="slate">Marker: {visibleWithGeo.length}</Badge>
-            <Badge tone={noGeoDealers.length ? "amber" : "slate"}>Ohne Geocode: {noGeoDealers.length}</Badge>
-            <Button variant="secondary" onClick={() => setShowNoGeoOnly((v) => !v)}>
-              {showNoGeoOnly ? "Alle anzeigen" : "Nur ohne Geocode"}
-            </Button>
-            <Button variant="secondary" onClick={() => setShowNoGeoList((v) => !v)}>
-              {showNoGeoList ? "Ohne‑Geocode‑Liste aus" : "Ohne‑Geocode‑Liste an"}
-            </Button>
           </div>
           <div className="flex gap-2">
             <Button onClick={runGeocode} disabled={geocodeBusy}>
@@ -483,7 +499,7 @@ const icon =
                       className="text-xs text-slate-600 underline"
                       onClick={() => {
                         const next: Record<string, boolean> = {};
-                        for (const m of manufacturers) next[m.key] = true;
+                        for (const m of manufacturersForUi) next[m.key] = true;
                         setSelectedManu(next);
                       }}
                       type="button"
@@ -494,7 +510,7 @@ const icon =
                       className="text-xs text-slate-600 underline"
                       onClick={() => {
                         const next: Record<string, boolean> = {};
-                        for (const m of manufacturers) next[m.key] = false;
+                        for (const m of manufacturersForUi) next[m.key] = false;
                         setSelectedManu(next);
                       }}
                       type="button"
@@ -504,14 +520,19 @@ const icon =
                   </div>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {manufacturers.map((m) => (
+                  {manufacturersForUi.map((m) => (
                     <label key={m.key} className="flex items-center gap-2 text-sm">
                       <input
                         type="checkbox"
                         checked={selectedManu[m.key] ?? true}
                         onChange={(e) => setSelectedManu((p) => ({ ...p, [m.key]: e.target.checked }))}
                       />
-                      <span>{m.label}</span>
+                      <img
+                        src={manuIconByKey.get(m.key) || "/markers/pin.svg"}
+                        alt={m.label}
+                        title={m.label}
+                        className="h-5 w-5 rounded-md object-contain"
+                      />
                     </label>
                   ))}
                 </div>
@@ -568,13 +589,13 @@ const icon =
                           <div className="text-sm font-semibold">{d.name}</div>
                           <div className="text-xs text-slate-600">{`${d.zip ?? ""} ${d.city ?? ""}`.trim()}</div>
                           <div className="mt-1 flex flex-wrap gap-1">
-                            {(keys2 as string[]).slice(0, 3).map((k: string) => (
+                            {keys2.slice(0, 3).map((k) => (
                               <Badge key={k} tone={k === "flyer" ? "blue" : "slate"} title={k === "flyer" ? "FLYER" : (labelByKey.get(k) ?? k)}>
-                                {k === "flyer" ? (
-                                  <img src="/markers/flyer.png" alt="FLYER" className="h-4 w-4" />
-                                ) : (
-                                  <span>{labelByKey.get(k) ?? k}</span>
-                                )}
+                                <img
+                                  src={manuIconByKey.get(k) || "/markers/pin.svg"}
+                                  alt={labelByKey.get(k) ?? k}
+                                  className="h-4 w-4 rounded-md object-contain"
+                                />
                               </Badge>
                             ))}
                             {keys2.length > 3 ? <Badge tone="slate">…</Badge> : null}
@@ -590,46 +611,6 @@ const icon =
                 })}
               </ul>
             )}
-{showNoGeoList ? (
-  <div className="mt-4">
-    <div className="flex items-center justify-between">
-      <div className="text-sm font-semibold">Händler ohne Geocode ({noGeoDealers.length})</div>
-      <div className="text-xs text-slate-500">Diese Händler haben noch keine Koordinaten und erscheinen nicht als Marker.</div>
-    </div>
-
-    {noGeoDealers.length === 0 ? (
-      <div className="text-sm text-slate-600 mt-2">Keine Händler ohne Geocode (innerhalb der aktuellen Filter).</div>
-    ) : (
-      <ul className="space-y-2 mt-2">
-        {noGeoDealers.slice(0, 200).map((d) => {
-          const keys2 = d.manufacturer_keys ?? [];
-          const repNames = dealerRepNames.get(d.id) ?? "";
-          return (
-            <li key={d.id} className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="text-left">
-                  <div className="text-sm font-semibold">{d.name}</div>
-                  <div className="text-xs text-slate-600">
-                    {[d.street, [d.zip, d.city].filter(Boolean).join(" "), d.country].filter(Boolean).join(", ")}
-                  </div>
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {keys2.includes("flyer") ? <Badge tone="amber">Flyer</Badge> : null}
-                    {repNames ? <Badge tone="slate">{repNames}</Badge> : null}
-                    <Badge tone="amber">ohne Geo</Badge>
-                  </div>
-                </div>
-                <Link className="text-xs underline text-slate-700" href={`/dealer/${d.id}`}>Öffnen</Link>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    )}
-    {noGeoDealers.length > 200 ? (
-      <div className="text-xs text-slate-500 mt-2">Es werden nur die ersten 200 angezeigt (Filter nutzen, um einzugrenzen).</div>
-    ) : null}
-  </div>
-) : null}
             {visibleWithGeo.length >= 2000 ? <div className="mt-2 text-xs text-slate-500">Liste gekürzt auf 2000.</div> : null}
           </CardContent>
         </Card>

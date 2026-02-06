@@ -1,9 +1,9 @@
+import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
-import { requireUser } from "@/app/api/_auth";
 
 export async function GET() {
   try {
-    const { supabase } = await requireUser();
+    const supabase = supabaseService();
 
     const step = 1000;
     let from = 0;
@@ -13,7 +13,8 @@ export async function GET() {
       const { data, error } = await supabase
         .from("dealers")
         .select(`
-          id,name,street,zip,city,country,zipcode_int,phone,email,website,opening_hours,lat,lng,geocode_status,notes,created_at,updated_at,
+          id,name,street,zip,city,country,phone,email,website,opening_hours,lat,lng,geocode_status,notes,created_at,updated_at,
+          buying_group_key,
           dealer_manufacturers!left(manufacturer_key)
         `)
         .order("name", { ascending: true })
@@ -35,12 +36,8 @@ export async function GET() {
       return { ...d, has_flyer, manufacturer_keys };
     });
 
-    // RLS macht die Filterung (Admin/SuperAdmin sehen alles, Aussendienst nur sein Gebiet)
     return ok({ items });
   } catch (e: any) {
-    const msg = String(e?.message || "");
-    if (msg === "unauthorized") return bad("unauthorized", 401);
-    if (msg === "forbidden") return bad("forbidden", 403);
     return bad(e?.message ?? "Failed to load dealers", 500);
   }
 }

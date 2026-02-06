@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
-import { requireRole } from "@/app/api/_auth";
 
 const UpdateSchema = z.object({
   role: z.enum(["Geschaeftsfuehrer","Verkauf","Werkstatt","Buchhaltung","Sonstiges"]).optional(),
@@ -14,7 +13,6 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string; con
   const { id, contactId } = await ctx.params;
   try {
     const body = UpdateSchema.parse(await req.json());
-    await requireRole(["admin", "superadmin"]);
     const supabase = supabaseService();
     const patch: any = {};
     for (const k of ["role","name","email","phone"] as const) {
@@ -36,7 +34,6 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string; con
 
 export async function DELETE(_: Request, ctx: { params: Promise<{ id: string; contactId: string }> }) {
   const { id, contactId } = await ctx.params;
-  await requireRole(["admin", "superadmin"]);
   const supabase = supabaseService();
   const { error } = await supabase
     .from("dealer_contacts")

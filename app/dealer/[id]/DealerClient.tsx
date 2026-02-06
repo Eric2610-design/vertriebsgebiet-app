@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, Button, Input, Textarea, Badge } from "@/components/ui";
+import { Pictogram } from "@/components/Pictogram";
 
 type ManufacturerItem = { key: string; label: string };
 
@@ -323,11 +324,25 @@ export default function DealerClient({ id }: { id: string }) {
     <main className="mx-auto max-w-5xl px-4 py-6">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">{d.name}</h1>
+          <div className="flex items-start gap-3">
+            <h1 className="text-xl font-semibold">{d.name}</h1>
+          </div>
           <p className="text-sm text-slate-600">{[d.street, `${d.zip ?? ""} ${d.city ?? ""}`].filter(Boolean).join(", ")}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {dealer.buying_group ? (
+            <Pictogram
+              kind="buying_group"
+              k={dealer.buying_group.key}
+              label={dealer.buying_group.label}
+              dataUrl={dealer.buying_group.icon_data_url}
+              size={20}
+              className="mr-1"
+            />
+          ) : null}
           <Link href="/map"><Button variant="secondary">Zur Karte</Button></Link>
+          <Link href="/cleanup"><Button variant="secondary">Cleanup</Button></Link>
+          <Link href="/admin/buying-groups"><Button variant="secondary">Einkaufsverbände</Button></Link>
           <Button variant="danger" onClick={deleteDealer}>Händler löschen</Button>
         </div>
       </div>
@@ -473,11 +488,7 @@ export default function DealerClient({ id }: { id: string }) {
               ) : (
                 (dealer.manufacturers ?? []).map((m: any) => (
                   <span key={m.key} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-sm">
-                    {m.key === "flyer" ? (
-                      <img src="/markers/flyer.png" alt="FLYER" className="h-4 w-4" title="FLYER" />
-                    ) : (
-                      <span>{manufacturerLabel.get(m.key) ?? m.key}</span>
-                    )}
+                    <Pictogram kind="manufacturer" k={m.key} label={manufacturerLabel.get(m.key) ?? m.key} size={18} />
                     <button className="text-xs text-slate-500 hover:text-rose-700" onClick={() => removeManufacturer(m.key)}>entfernen</button>
                   </span>
                 ))

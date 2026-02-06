@@ -1,67 +1,45 @@
-import { NextRequest, NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
 const PUBLIC_FILE = /\.(.*)$/;
+
+function isPublicPath(pathname: string) {
+  if (pathname.startsWith("/_next")) return true;
+  if (pathname.startsWith("/favicon")) return true;
+  if (pathname.startsWith("/markers")) return true;
+  if (pathname.startsWith("/brands")) return true;
+  if (pathname.startsWith("/robots.txt")) return true;
+  if (pathname.startsWith("/sitemap")) return true;
+  if (PUBLIC_FILE.test(pathname)) return true;
+  return false;
+}
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // allow next internals / static / public files
-  if (
-    pathname.startsWith("/_next") ||
-    pathname.startsWith("/favicon") ||
-    pathname.startsWith("/assets") ||
-    PUBLIC_FILE.test(pathname)
-  ) {
-    return NextResponse.next();
-  }
+  // Public paths
+  if (isPublicPath(pathname)) return NextResponse.next();
+  if (pathname === "/login") return NextResponse.next();
+  if (pathname.startsWith("/api/login") || pathname.startsWith("/api/logout")) return NextResponse.next();
 
-  // allow auth endpoints + login/callback pages
-  if (
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/callback") ||
-    pathname.startsWith("/set-password") ||
-    pathname.startsWith("/api/auth")
-  ) {
-    return NextResponse.next();
-  }
+  const authed = req.cookies.get("vt_authed")?.value === "1";
 
-  const at = req.cookies.get("vt_at")?.value;
-  const role = req.cookies.get("vt_role")?.value;
-  if (!at) {
+  // Block unauthenticated
+  if (!authed) {
+    // API calls: return 401 JSON
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "not_authenticated" }, { status: 401 });
+    }
+
     const url = req.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);
   }
 
-  // Role gating (UI convenience; APIs validate again)
-  const isAdmin = role === "admin" || role === "superadmin";
-  const isSuperAdmin = role === "superadmin";
-
-  if (pathname.startsWith("/admin/users") || pathname.startsWith("/api/admin/users")) {
-    if (!isSuperAdmin) {
-      const url = req.nextUrl.clone();
-      url.pathname = "/map";
-      return NextResponse.redirect(url);
-    }
-  }
-
-  if (
-    pathname.startsWith("/admin") ||
-    pathname.startsWith("/import") ||
-    pathname.startsWith("/cleanup") ||
-    pathname.startsWith("/ad")
-  ) {
-    if (!isAdmin) {
-      const url = req.nextUrl.clone();
-      url.pathname = "/map";
-      return NextResponse.redirect(url);
-    }
-  }
-
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image).*)"],
+  matcher: ["/:path*"],
 };

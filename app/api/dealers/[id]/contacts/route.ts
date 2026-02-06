@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
-import { requireRole, requireUser } from "@/app/api/_auth";
 
 const CreateSchema = z.object({
   role: z.enum(["Geschaeftsfuehrer","Verkauf","Werkstatt","Buchhaltung","Sonstiges"]),
@@ -12,11 +11,7 @@ const CreateSchema = z.object({
 
 export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const { supabase } = await requireUser();
-
-  // Sicher: wenn Dealer per RLS nicht sichtbar ist, blocken wir.
-  const { data: dealer } = await supabase.from("dealers").select("id").eq("id", id).maybeSingle();
-  if (!dealer) return bad("forbidden", 403);
+  const supabase = supabaseService();
   const { data, error } = await supabase
     .from("dealer_contacts")
     .select("id,dealer_id,role,name,email,phone,created_at,updated_at")
@@ -31,7 +26,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const { id } = await ctx.params;
   try {
     const body = CreateSchema.parse(await req.json());
-    await requireRole(["admin", "superadmin"]);
     const supabase = supabaseService();
     const { data, error } = await supabase
       .from("dealer_contacts")
