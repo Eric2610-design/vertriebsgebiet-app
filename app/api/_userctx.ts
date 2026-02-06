@@ -25,7 +25,10 @@ export function inRanges(dealerCountry: string | null | undefined, zipcodeInt: n
 }
 
 export async function getUserContext() {
-  const email = (cookies().get("vt_email")?.value || "").trim().toLowerCase();
+  // Next.js 15+ may type `cookies()` as async in some contexts (e.g. build/static analysis).
+  // `await` keeps this compatible.
+  const cookieStore = await cookies();
+  const email = (cookieStore.get("vt_email")?.value || "").trim().toLowerCase();
   if (!email) {
     return { email: "", role: null as UserRole, ranges: [] as AdRange[], profileId: null as string | null };
   }
