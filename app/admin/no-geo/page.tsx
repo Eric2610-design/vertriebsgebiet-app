@@ -23,6 +23,8 @@ export default function AdminNoGeoPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -45,6 +47,31 @@ export default function AdminNoGeoPage() {
   }, []);
 
   const rows = useMemo(() => items, [items]);
+
+  const exportUrl = useMemo(() => {
+    const u = new URL("/api/admin/dealers/no-geo/export", window.location.origin);
+    if (q.trim()) u.searchParams.set("q", q.trim());
+    return u.toString();
+  }, [q]);
+
+  const doImport = async () => {
+    if (!importFile) return;
+    try {
+      setImportBusy(true);
+      const fd = new FormData();
+      fd.append("file", importFile);
+      const res = await fetch("/api/admin/dealers/no-geo/import", { method: "POST", body: fd });
+      const js = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(js?.error || "Import fehlgeschlagen");
+      alert(`Import OK: ${js.updated ?? 0} aktualisiert, ${js.skipped ?? 0} übersprungen`);
+      setImportFile(null);
+      await load();
+    } catch (e: any) {
+      alert(e?.message ?? "Import fehlgeschlagen");
+    } finally {
+      setImportBusy(false);
+    }
+  };
 
   return (
     <RequireRole allow={["admin", "superadmin"]}>
@@ -69,7 +96,25 @@ export default function AdminNoGeoPage() {
                 Suchen
               </Button>
             </div>
-            <Badge tone="slate">{loading ? "…" : `${rows.length} Treffer`}</Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              <a href={exportUrl} className="inline-block">
+                <Button variant="secondary" className="h-9" disabled={loading}>
+                  Export CSV
+                </Button>
+              </a>
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                  className="text-sm"
+                />
+              </label>
+              <Button variant="primary" className="h-9" onClick={doImport} disabled={!importFile || importBusy}>
+                {importBusy ? "Import…" : "CSV importieren"}
+              </Button>
+              <Badge tone="slate">{loading ? "…" : `${rows.length} Treffer`}</Badge>
+            </div>
           </CardHeader>
           <CardContent>
             {error ? <div className="text-sm text-rose-700">{error}</div> : null}
@@ -137,6 +182,24 @@ function NoGeoRow({
     }
   };
 
+  const force = async () => {
+    try {
+      onBusy(d.id);
+      const res = await fetch("/api/admin/dealers/force-geocode", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: d.id }),
+      });
+      const js = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(js?.error || "Force fehlgeschlagen");
+      onUpdated();
+    } catch (e: any) {
+      alert(e?.message ?? "Force fehlgeschlagen");
+    } finally {
+      onBusy(null);
+    }
+  };
+
   return (
     <tr className="border-b border-slate-100 align-top">
       <td className="py-2 pr-2">
@@ -167,9 +230,14 @@ function NoGeoRow({
         />
       </td>
       <td className="py-2 pr-2">
-        <Button variant="primary" className="h-8" onClick={save} disabled={busy}>
-          Speichern
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="primary" className="h-8" onClick={save} disabled={busy}>
+            Speichern
+          </Button>
+          <Button variant="secondary" className="h-8" onClick={force} disabled={busy}>
+            Force
+          </Button>
+        </div>
       </td>
     </tr>
   );
