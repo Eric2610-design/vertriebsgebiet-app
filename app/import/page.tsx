@@ -54,6 +54,8 @@ function detectManufacturer(rows: any[], cols: string[]): ManufacturerKey | null
   if (has("Kunden Straße/Hausnummer") && has("Kunden PLZ")) return "flyer";
   if (has("Adressart") && has("PLZ-Code")) return "bico";
   if (has("opening_hours") && has("dealer_url")) return "kalkhoff";
+  // KTM export (current template)
+  if (has("name") && has("street") && has("zip") && has("city") && has("opening_hours") && has("map_url")) return "ktm";
   // AD/PLZ mapping
   if (has("PLZ_Bereiche") && (has("E-Mail") || has("E-Mail-Adresse"))) return "__ad_mapping__" as any;
   return null;
@@ -199,6 +201,20 @@ function rowsToDrafts(manu: ManufacturerKey, rows: any[]): DealerDraft[] {
           country: pick(r, ["Länder-/Regionscode"]) ?? "DE",
           phone: pick(r, ["Telefonnr."]),
           website: pick(r, ["Homepage"]),
+        } satisfies DealerDraft;
+      }
+      if (manu === "ktm") {
+        return {
+          source: manu,
+          name: pick(r, ["name"]) ?? "",
+          street: pick(r, ["street"]),
+          zip: pick(r, ["zip"]),
+          city: pick(r, ["city"]),
+          country: pick(r, ["country"]) ?? "DE",
+          phone: pick(r, ["phone"]),
+          email: pick(r, ["email"]),
+          opening_hours: pick(r, ["opening_hours"]),
+          source_url: pick(r, ["map_url"]),
         } satisfies DealerDraft;
       }
       // kalkhoff

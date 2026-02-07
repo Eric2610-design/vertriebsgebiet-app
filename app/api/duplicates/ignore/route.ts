@@ -28,12 +28,16 @@ export async function POST(req: Request) {
   if (rows.length === 0) return bad("Keine gültigen Paare", 400);
 
   // Use upsert to avoid breaking on already ignored pairs.
-  const { error } = await supabase
-    .from("dealer_duplicate_ignores")
-    .upsert(rows, { onConflict: "dealer_id_a,dealer_id_b", ignoreDuplicates: true })
-    .select("id")
-    .throwOnError()
-    .catch((e: any) => ({ error: e }));
+  let error: any = null;
+  try {
+    await supabase
+      .from("dealer_duplicate_ignores")
+      .upsert(rows, { onConflict: "dealer_id_a,dealer_id_b", ignoreDuplicates: true })
+      .select("id")
+      .throwOnError();
+  } catch (e: any) {
+    error = e;
+  }
 
   // If the insert fails because the table doesn't exist yet, return a helpful message.
   if ((error as any)?.message?.includes("dealer_duplicate_ignores") && (error as any)?.message?.includes("does not exist")) {
