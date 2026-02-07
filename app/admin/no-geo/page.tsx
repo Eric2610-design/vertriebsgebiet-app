@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Badge, Button, Card, CardContent, CardHeader, Input } from "@/components/ui";
+import { Badge, Button, Card, CardContent, CardHeader, Input, Select } from "@/components/ui";
+import { DealerListPictos } from "@/components/DealerListPictos";
 import RequireRole from "@/components/RequireRole";
 import { coordsMatchCountry } from "@/lib/geo/countryBounds";
 
@@ -17,10 +18,13 @@ type Dealer = {
   lng: number | null;
   geocode_status: string | null;
   updated_at: string | null;
+  buying_group_key?: string | null;
+  manufacturer_keys?: string[];
 };
 
 export default function AdminNoGeoPage() {
   const [q, setQ] = useState("");
+  const [sort, setSort] = useState<"updated" | "zip" | "buying_group">("updated");
   const [items, setItems] = useState<Dealer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +87,10 @@ export default function AdminNoGeoPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/dealers/no-geo?q=${encodeURIComponent(q)}`, { cache: "no-store" });
+      const res = await fetch(
+        `/api/admin/dealers/no-geo?sort=${sort}&q=${encodeURIComponent(q)}`,
+        { cache: "no-store" }
+      );
       const js = await res.json();
       if (!res.ok) throw new Error(js?.error || "Fehler beim Laden");
       setItems(js.items ?? []);
@@ -97,7 +104,7 @@ export default function AdminNoGeoPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [sort]);
 
   const rows = useMemo(() => items, [items]);
 
@@ -212,6 +219,18 @@ export default function AdminNoGeoPage() {
                 placeholder="Suche (Name/Ort/PLZ)"
                 className="w-full md:w-80"
               />
+              <div className="w-52">
+                <Select
+                  value={sort}
+                  onChange={(e) => {
+                    setSort((e.target.value as any) ?? "updated");
+                  }}
+                >
+                  <option value="updated">Zuletzt geändert</option>
+                  <option value="zip">PLZ</option>
+                  <option value="buying_group">Einkaufsverband</option>
+                </Select>
+              </div>
               <Button variant="secondary" onClick={load} disabled={loading}>
                 Suchen
               </Button>
@@ -388,6 +407,14 @@ function NoGeoRow({
           <Link href={`/dealer/${encodeURIComponent(d.id)}`} className="hover:underline">
             {d.name}
           </Link>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-1">
+          <DealerListPictos
+            manufacturerKeys={d.manufacturer_keys ?? []}
+            buyingGroupKey={d.buying_group_key ?? null}
+            size={16}
+            maxManufacturers={4}
+          />
         </div>
         <div className="text-xs text-slate-500">{d.id}</div>
       </td>

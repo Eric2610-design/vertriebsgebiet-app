@@ -25,7 +25,9 @@ export async function GET(req: Request) {
 
   let query = supabase
     .from("dealers")
-    .select("id,name,street,zip,city,country,country_iso,lat,lng")
+    .select(
+      "id,name,street,zip,city,country,country_iso,lat,lng,buying_group_key,dealer_manufacturers(manufacturer_key)"
+    )
     .eq("country_iso", countryIso)
     .not("lat", "is", null)
     .not("lng", "is", null)
@@ -39,5 +41,11 @@ export async function GET(req: Request) {
   const { data, error } = await query;
   if (error) return bad(error.message, 500);
 
-  return ok({ items: data ?? [] });
+  const items = (data ?? []).map((d: any) => {
+    const manufacturer_keys = (d.dealer_manufacturers ?? []).map((x: any) => x.manufacturer_key);
+    const { dealer_manufacturers, ...rest } = d;
+    return { ...rest, manufacturer_keys };
+  });
+
+  return ok({ items });
 }

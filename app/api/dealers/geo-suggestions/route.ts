@@ -78,7 +78,9 @@ export async function GET(req: Request) {
   // Load target (dealer without geo)
   const { data: tRow, error: tErr } = await supabase
     .from("dealers")
-    .select("id,name,street,zip,city,country,country_iso,lat,lng")
+    .select(
+      "id,name,street,zip,city,country,country_iso,lat,lng,buying_group_key,dealer_manufacturers(manufacturer_key)"
+    )
     .eq("id", id)
     .maybeSingle();
 
@@ -89,8 +91,11 @@ export async function GET(req: Request) {
   if (!countryIso) return ok({ target: tRow, items: [] });
 
   const zip = String(tRow?.zip ?? "").trim();
-  const city = String(tRow?.city ?? "").trim();
-  const zipPrefix2 = zip.length >= 2 ? zip.slice(0, 2) : "";
+  // IMPORTANT: user requirement
+  // Suggestions are ONLY allowed if the ZIP matches exactly.
+  // If ZIP is missing -> return no suggestions.
+  const zipNorm = zip.replace(/\s+/g, "");
+  if (!zipNorm) return ok({ target: tRow, items: [] });
 
   // Candidate pool (keep it bounded)
   const seen = new Set<string>();
@@ -108,49 +113,19 @@ export async function GET(req: Request) {
   }
 
   try {
-    // 1) Zip prefix pool (best)
-    if (zipPrefix2) {
-      await addCandidates(
-        supabase
-          .from("dealers")
-          .select("id,name,street,zip,city,country,country_iso,lat,lng")
-          .eq("country_iso", countryIso)
-          .not("lat", "is", null)
-          .not("lng", "is", null)
-          .like("zip", `${zipPrefix2}%`)
-          .limit(1500)
-      );
-    }
-
-    // 2) City pool (fallback)
-    if (city) {
-      await addCandidates(
-        supabase
-          .from("dealers")
-          .select("id,name,street,zip,city,country,country_iso,lat,lng")
-          .eq("country_iso", countryIso)
-          .not("lat", "is", null)
-          .not("lng", "is", null)
-          .ilike("city", city)
-          .limit(800)
-      );
-    }
-
-    // 3) Name prefix pool (very helpful when zip/city is messy)
-    const name = String(tRow?.name ?? "").trim();
-    const namePrefix = name.length >= 4 ? name.slice(0, 4) : name;
-    if (namePrefix.length >= 2) {
-      await addCandidates(
-        supabase
-          .from("dealers")
-          .select("id,name,street,zip,city,country,country_iso,lat,lng")
-          .eq("country_iso", countryIso)
-          .not("lat", "is", null)
-          .not("lng", "is", null)
-          .ilike("name", `${namePrefix}%`)
-          .limit(800)
-      );
-    }
+    // Exact ZIP match only
+    await addCandidates(
+      supabase
+        .from("dealers")
+        .select(
+          "id,name,street,zip,city,country,country_iso,lat,lng,buying_group_key,dealer_manufacturers(manufacturer_key)"
+        )
+        .eq("country_iso", countryIso)
+        .not("lat", "is", null)
+        .not("lng", "is", null)
+        .eq("zip", zipNorm)
+        .limit(2000)
+    );
   } catch (e: any) {
     return bad(e?.message ?? "Error building suggestions", 500);
   }
@@ -158,13 +133,18 @@ export async function GET(req: Request) {
   // Score & sort
   const scored = candidates
     .filter((c) => c.id !== tRow.id)
+    .filter((c) => String(c?.zip ?? "").replace(/\s+/g, "") === zipNorm)
     .map((c) => {
       const { score, nameScore } = scoreCandidate(tRow, c);
-      return { ...c, score, name_score: nameScore };
+      const manufacturer_keys = (c.dealer_manufacturers ?? []).map((x: any) => x.manufacturer_key);
+      const { dealer_manufacturers, ...rest } = c;
+      return { ...rest, manufacturer_keys, score, name_score: nameScore };
     })
     .filter((x) => x.score >= 0.15) // keep UI clean
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
     .slice(0, 20);
 
-  return ok({ target: tRow, items: scored });
+  const target_manufacturer_keys = ((tRow as any)?.dealer_manufacturers ?? []).map((x: any) => x.manufacturer_key);
+  const { dealer_manufacturers: _tDm, ...targetRest } = (tRow as any) ?? {};
+  return ok({ target: { ...targetRest, manufacturer_keys: target_manufacturer_keys }, items: scored });
 }

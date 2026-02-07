@@ -805,7 +805,7 @@ export default function MapPage() {
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement("a");
                   a.href = url;
-                  a.download = "haendler_kartenausschnitt.xlsx";
+                  a.download = "export.xlsx";
                   document.body.appendChild(a);
                   a.click();
                   a.remove();
@@ -817,7 +817,7 @@ export default function MapPage() {
                 }
               }}
             >
-              Excel
+              Export
             </Button>
           </CardHeader>
           <CardContent className="max-h-[72vh] overflow-auto">

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { NAV_ITEMS, isAllowed } from "@/components/nav";
+import { NAV_ITEMS, ADMIN_SUB_ITEMS, isAllowed } from "@/components/nav";
 import { Button } from "@/components/ui";
 import { useUser } from "@/components/useUser";
 
@@ -40,6 +40,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return NAV_ITEMS.filter((it) => isAllowed(role, it));
   }, [me]);
 
+  const visibleAdminItems = useMemo(() => {
+    const role = me?.role ?? null;
+    return ADMIN_SUB_ITEMS.filter((it) => isAllowed(role, it));
+  }, [me]);
+
+  const adminActive = (pathname?.startsWith("/admin") ?? false);
+
   const logout = async () => {
     try {
       await fetch("/api/logout", { method: "POST" });
@@ -65,13 +72,29 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <nav className="flex-1 px-3">
           <div className="space-y-1">
             {visibleItems.map((it) => (
-              <NavLink
-                key={it.key}
-                href={it.href}
-                active={pathname === it.href || pathname?.startsWith(it.href + "/")}
-              >
-                {it.label}
-              </NavLink>
+              <div key={it.key}>
+                <NavLink
+                  href={it.href}
+                  active={pathname === it.href || pathname?.startsWith(it.href + "/")}
+                >
+                  {it.label}
+                </NavLink>
+
+                {/* Admin-Untermenü: nur sichtbar, wenn man im Admin-Bereich ist */}
+                {it.key === "admin" && adminActive ? (
+                  <div className="mt-1 ml-3 space-y-1">
+                    {visibleAdminItems.map((ai) => (
+                      <NavLink
+                        key={ai.key}
+                        href={ai.href}
+                        active={pathname === ai.href || pathname?.startsWith(ai.href + "/")}
+                      >
+                        <span className="text-xs">{ai.label}</span>
+                      </NavLink>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             ))}
           </div>
         </nav>
@@ -140,19 +163,40 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <nav className="px-3 pb-4">
               <div className="space-y-1">
                 {visibleItems.map((it) => (
-                  <Link
-                    key={it.key}
-                    href={it.href}
-                    className={
-                      "flex items-center rounded-xl px-3 py-2 text-sm font-medium transition " +
-                      ((pathname === it.href || pathname?.startsWith(it.href + "/"))
-                        ? "bg-slate-900 text-white"
-                        : "text-slate-700 hover:bg-slate-100")
-                    }
-                    onClick={() => setMobileOpen(false)}
-                  >
-                    {it.label}
-                  </Link>
+                  <div key={it.key}>
+                    <Link
+                      href={it.href}
+                      className={
+                        "flex items-center rounded-xl px-3 py-2 text-sm font-medium transition " +
+                        ((pathname === it.href || pathname?.startsWith(it.href + "/"))
+                          ? "bg-slate-900 text-white"
+                          : "text-slate-700 hover:bg-slate-100")
+                      }
+                      onClick={() => setMobileOpen(false)}
+                    >
+                      {it.label}
+                    </Link>
+
+                    {it.key === "admin" && adminActive ? (
+                      <div className="mt-1 ml-3 space-y-1">
+                        {visibleAdminItems.map((ai) => (
+                          <Link
+                            key={ai.key}
+                            href={ai.href}
+                            className={
+                              "flex items-center rounded-xl px-3 py-2 text-xs font-medium transition " +
+                              ((pathname === ai.href || pathname?.startsWith(ai.href + "/"))
+                                ? "bg-slate-900 text-white"
+                                : "text-slate-700 hover:bg-slate-100")
+                            }
+                            onClick={() => setMobileOpen(false)}
+                          >
+                            {ai.label}
+                          </Link>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                 ))}
               </div>
               <Button variant="secondary" className="mt-4 w-full" onClick={logout}>

@@ -77,6 +77,7 @@ export async function GET(req: Request) {
   const offset = Math.max(parseInt(url.searchParams.get("offset") ?? "0", 10) || 0, 0);
   const q = (url.searchParams.get("q") ?? "").trim();
   const onlyMatch = (url.searchParams.get("only_match") ?? "0") === "1";
+  const sort = (url.searchParams.get("sort") ?? "zip").trim(); // zip | buying_group
 
   // If only_match=1, we build a filtered list of dealers without geo
   // that have at least one "usable" suggestion (score >= 0.15) in the same country_iso.
@@ -86,12 +87,13 @@ export async function GET(req: Request) {
     let base = supabase
       .from("dealers")
       .select(
-        "id,name,street,zip,city,country,country_iso,lat,lng,merged_into,status,parent_dealer_id,branch_label,buying_group_key"
+        "id,name,street,zip,city,country,country_iso,lat,lng,merged_into,status,parent_dealer_id,branch_label,buying_group_key,dealer_manufacturers(manufacturer_key)"
       )
       .or("lat.is.null,lng.is.null")
       .is("merged_into", null)
       .neq("status", "excluded")
       .neq("status", "merged")
+      .order(sort === "buying_group" ? "buying_group_key" : "zip", { ascending: true, nullsFirst: false })
       .order("zip", { ascending: true, nullsFirst: false })
       .order("city", { ascending: true })
       .order("name", { ascending: true })
@@ -102,25 +104,22 @@ export async function GET(req: Request) {
     const { data: raw, error: rawErr } = await base;
     if (rawErr) return bad(rawErr.message, 500);
 
-    const rows = (raw ?? []).filter((r) => (r?.country_iso ? true : false));
+    const rows = (raw ?? [])
+      .filter((r) => (r?.country_iso ? true : false))
+      .map((d: any) => {
+        const manufacturer_keys = (d.dealer_manufacturers ?? []).map((x: any) => x.manufacturer_key);
+        const { dealer_manufacturers, ...rest } = d;
+        return { ...rest, manufacturer_keys };
+      });
 
     async function hasUsableMatch(t: any): Promise<boolean> {
       const countryIso = String(t?.country_iso ?? "").trim();
       if (!countryIso) return false;
 
-      const zip = String(t?.zip ?? "").trim();
-      const city = String(t?.city ?? "").trim();
-      const zipPrefix2 = zip.length >= 2 ? zip.slice(0, 2) : "";
-      const name = String(t?.name ?? "").trim();
-      const namePrefix = name.length >= 4 ? name.slice(0, 4) : name;
-
-      // Build a single bounded candidate query.
-      // We keep OR conditions broad because zip/city can be messy.
-      const ors: string[] = [];
-      if (zipPrefix2) ors.push(`zip.like.${zipPrefix2}%`);
-      if (city) ors.push(`city.ilike.${city}`);
-      if (namePrefix.length >= 2) ors.push(`name.ilike.${namePrefix}%`);
-      const orStr = ors.length ? ors.join(",") : "name.ilike.%";
+      // IMPORTANT: user requirement
+      // "usable" match for geo-merge exists ONLY if ZIP matches exactly.
+      const zip = String(t?.zip ?? "").trim().replace(/\s+/g, "");
+      if (!zip) return false;
 
       const { data: cand, error: cErr } = await supabase
         .from("dealers")
@@ -128,12 +127,13 @@ export async function GET(req: Request) {
         .eq("country_iso", countryIso)
         .not("lat", "is", null)
         .not("lng", "is", null)
-        .or(orStr)
+        .eq("zip", zip)
         .limit(400);
 
       if (cErr) return false;
       const candidates = cand ?? [];
       for (const c of candidates) {
+        if (String(c?.zip ?? "").trim().replace(/\s+/g, "") !== zip) continue;
         const { score } = scoreCandidate(t, c);
         if (score >= 0.15) return true;
       }
@@ -152,12 +152,13 @@ export async function GET(req: Request) {
   let query = supabase
     .from("dealers")
     .select(
-      "id,name,street,zip,city,country,country_iso,lat,lng,merged_into,status,parent_dealer_id,branch_label,buying_group_key"
+      "id,name,street,zip,city,country,country_iso,lat,lng,merged_into,status,parent_dealer_id,branch_label,buying_group_key,dealer_manufacturers(manufacturer_key)"
     )
     .or("lat.is.null,lng.is.null")
     .is("merged_into", null)
     .neq("status", "excluded")
     .neq("status", "merged")
+    .order(sort === "buying_group" ? "buying_group_key" : "zip", { ascending: true, nullsFirst: false })
     .order("zip", { ascending: true, nullsFirst: false })
     .order("city", { ascending: true })
     .order("name", { ascending: true })
@@ -168,5 +169,11 @@ export async function GET(req: Request) {
   const { data, error } = await query;
   if (error) return bad(error.message, 500);
 
-  return ok({ items: data ?? [], limit, offset });
+  const items = (data ?? []).map((d: any) => {
+    const manufacturer_keys = (d.dealer_manufacturers ?? []).map((x: any) => x.manufacturer_key);
+    const { dealer_manufacturers, ...rest } = d;
+    return { ...rest, manufacturer_keys };
+  });
+
+  return ok({ items, limit, offset });
 }

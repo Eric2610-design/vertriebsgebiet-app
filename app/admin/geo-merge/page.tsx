@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, CardContent, CardHeader, Input } from "@/components/ui";
+import { DealerListPictos } from "@/components/DealerListPictos";
 
 type DealerRow = {
   id: string;
@@ -14,6 +15,8 @@ type DealerRow = {
   country_iso: string | null;
   lat: number | null;
   lng: number | null;
+  buying_group_key?: string | null;
+  manufacturer_keys?: string[];
 };
 
 type Suggestion = DealerRow & { score?: number; name_score?: number };
@@ -27,6 +30,8 @@ export default function GeoMergePage() {
   const [q, setQ] = useState("");
   const [offset, setOffset] = useState(0);
   const limit = 150;
+
+  const [sort, setSort] = useState<"zip" | "buying_group">("zip");
 
   const [active, setActive] = useState<DealerRow | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -47,7 +52,7 @@ export default function GeoMergePage() {
     setLoading(true);
     try {
       const res = await fetch(
-        `/api/dealers/no-geo?only_match=1&scan=2500&limit=${limit}&offset=${offset}&q=${encodeURIComponent(q.trim())}`,
+        `/api/dealers/no-geo?only_match=1&scan=2500&sort=${sort}&limit=${limit}&offset=${offset}&q=${encodeURIComponent(q.trim())}`,
         { cache: "no-store" }
       );
       const js = await res.json();
@@ -66,7 +71,7 @@ export default function GeoMergePage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offset]);
+  }, [offset, sort]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -202,6 +207,19 @@ export default function GeoMergePage() {
                 <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="z.B. Lucky Bike" />
               </div>
               <div className="flex gap-2">
+                <div className="w-52">
+                  <label className="text-sm text-slate-700">Sortieren</label>
+                  <Select
+                    value={sort}
+                    onChange={(e) => {
+                      setOffset(0);
+                      setSort((e.target.value as any) === "buying_group" ? "buying_group" : "zip");
+                    }}
+                  >
+                    <option value="zip">PLZ</option>
+                    <option value="buying_group">Einkaufsverband</option>
+                  </Select>
+                </div>
                 <Button
                   variant="secondary"
                   disabled={offset === 0 || loading}
@@ -230,6 +248,14 @@ export default function GeoMergePage() {
                     <div className="min-w-0">
                       <div className="font-medium text-sm truncate">{d.name}</div>
                       <div className="text-xs text-slate-600 truncate">{fmtAddr(d)}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                        <DealerListPictos
+                          manufacturerKeys={d.manufacturer_keys ?? []}
+                          buyingGroupKey={d.buying_group_key ?? null}
+                          size={16}
+                          maxManufacturers={4}
+                        />
+                      </div>
                     </div>
                     <div className="text-xs text-slate-500">{String(d.zip ?? "").padStart(5, " ")}</div>
                   </div>
@@ -294,6 +320,14 @@ export default function GeoMergePage() {
                         <div className="min-w-0">
                           <div className="font-medium text-sm truncate">{m.name}</div>
                           <div className="text-xs text-slate-600 truncate">{fmtAddr(m)}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                        <DealerListPictos
+                          manufacturerKeys={m.manufacturer_keys ?? []}
+                          buyingGroupKey={m.buying_group_key ?? null}
+                          size={16}
+                          maxManufacturers={4}
+                        />
+                      </div>
                         </div>
                         <Button onClick={() => mergeInto(m.id)}>Merge</Button>
                       </div>
@@ -311,6 +345,14 @@ export default function GeoMergePage() {
                   <div className="min-w-0">
                     <div className="font-medium text-sm truncate">{s.name}</div>
                     <div className="text-xs text-slate-600 truncate">{fmtAddr(s)}</div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                      <DealerListPictos
+                        manufacturerKeys={s.manufacturer_keys ?? []}
+                        buyingGroupKey={s.buying_group_key ?? null}
+                        size={16}
+                        maxManufacturers={4}
+                      />
+                    </div>
                     <div className="text-xs text-slate-500 mt-1">
                       Score: {Number(s.score ?? 0).toFixed(3)} · Name: {Number(s.name_score ?? 0).toFixed(3)}
                     </div>

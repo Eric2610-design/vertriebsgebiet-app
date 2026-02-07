@@ -1,113 +1,52 @@
-"use client";
+import { Card, CardContent, CardHeader, Badge } from "@/components/ui";
 
-import { Suspense, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { Button, Card, CardContent, CardHeader, Input, Badge } from "@/components/ui";
-
-function LoginInner() {
-  const sp = useSearchParams();
-  const next = sp.get("next") || "/map";
-
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-
-  const canSubmit = useMemo(() => {
-    return email.trim().length > 3 && password.trim().length > 0;
-  }, [email, password]);
-
-  async function submit() {
-    if (!canSubmit) return;
-    setErr("");
-    setBusy(true);
-    try {
-      const res = await fetch("/api/login", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password, next }),
-      });
-      const js = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(js?.error || "Login fehlgeschlagen");
-      window.location.href = js?.next || next;
-    } catch (e: any) {
-      setErr(e?.message || "Login fehlgeschlagen");
-    } finally {
-      setBusy(false);
-    }
-  }
-
+export default function HomePage() {
   return (
-    <main className="mx-auto max-w-lg px-4 py-10">
-      <Card>
-        <CardHeader className="flex items-center justify-between">
-          <div>
-            <div className="text-xl font-semibold">Login</div>
-            <div className="text-sm text-slate-600">Zugriff per Passwort (Erich/David).</div>
+    <div className="mx-auto max-w-6xl px-4 py-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Händlerkarte</h1>
+          <p className="mt-1 text-sm text-slate-600">
+            Import → Dubletten zusammenführen → Geocoding → Karte → Händlerseite
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Badge tone="blue">Flyer = eigener Marker</Badge>
+            <Badge tone="slate">Andere Hersteller</Badge>
+            <Badge tone="amber">Dubletten-Prüfung</Badge>
           </div>
-          <Badge tone="slate">{busy ? "…" : "bereit"}</Badge>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {err ? <div className="text-sm text-rose-700">{err}</div> : null}
+        </div>
+      </div>
 
-          <div>
-            <label className="text-sm text-slate-700">E-Mail</label>
-            <Input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="z.B. d.heise@flyer-bikes.com"
-              autoComplete="username"
-            />
-          </div>
+      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader className="text-sm font-semibold">1) Dateien importieren</CardHeader>
+          <CardContent className="text-sm text-slate-600">
+            Excel-Dateien lokal auswählen. Parsing passiert im Browser (schnell, kein Upload der Rohdatei).
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="text-sm font-semibold">2) Dubletten mergen</CardHeader>
+          <CardContent className="text-sm text-slate-600">
+            Vorschläge nach Name+Adresse. Du entscheidest, was zusammengeführt wird.
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="text-sm font-semibold">3) Geocoding + Karte</CardHeader>
+          <CardContent className="text-sm text-slate-600">
+            Geocoding über Nominatim (rate limited). Händlerseite ohne Zwang zu Geodaten.
+          </CardContent>
+        </Card>
+      </div>
 
-          <div>
-            <label className="text-sm text-slate-700">Passwort</label>
-            <Input
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Passwort"
-              type="password"
-              autoComplete="current-password"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submit();
-              }}
-            />
-          </div>
-
-          <Button onClick={submit} disabled={!canSubmit || busy}>
-            {busy ? "Login…" : "Login"}
-          </Button>
-
-          <div className="text-xs text-slate-500">
-            Tipp: Falls du mehrere Admins hast, setze <code>VT_ADMIN_EMAILS</code> in Vercel.
-          </div>
-        </CardContent>
-      </Card>
-    </main>
-  );
-}
-
-export default function LoginPage() {
-  return (
-    <Suspense
-      fallback={
-        <main className="mx-auto max-w-lg px-4 py-10">
-          <Card>
-            <CardHeader className="flex items-center justify-between">
-              <div>
-                <div className="text-xl font-semibold">Login</div>
-                <div className="text-sm text-slate-600">Lade…</div>
-              </div>
-              <Badge tone="slate">…</Badge>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="text-sm text-slate-600">Bitte einen Moment…</div>
-            </CardContent>
-          </Card>
-        </main>
-      }
-    >
-      <LoginInner />
-    </Suspense>
+      <div className="mt-6">
+        <Card>
+          <CardHeader className="text-sm font-semibold">Admin / Datenpflege</CardHeader>
+          <CardContent className="text-sm text-slate-600">
+            Händler bearbeiten, fehlende Daten ergänzen, Besuche dokumentieren, Hersteller-Zuordnung löschen.
+            Login/Profil-Sicht (Gebiete) ist vorbereitet, Auth kommt später.
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }
