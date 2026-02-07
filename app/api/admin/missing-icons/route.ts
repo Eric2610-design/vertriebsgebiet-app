@@ -4,7 +4,7 @@ import { requireAdmin } from "@/app/api/_admin";
 
 export async function GET(req: Request) {
   try {
-    requireAdmin(req);
+    await requireAdmin();
 
     const supabase = supabaseService();
     const [mRes, bRes] = await Promise.all([

@@ -4,7 +4,7 @@ import { requireAdmin } from "@/app/api/_admin";
 
 export async function POST(req: Request) {
   try {
-    requireAdmin(req);
+    await requireAdmin();
     const body = await req.json().catch(() => ({}));
     const dealer_id = String(body?.dealer_id || "").trim();
     const buying_group_key_raw = body?.buying_group_key;

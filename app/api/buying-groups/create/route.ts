@@ -4,7 +4,7 @@ import { requireAdmin } from "@/app/api/_admin";
 
 export async function POST(req: Request) {
   try {
-    requireAdmin(req);
+    await requireAdmin();
     const body = await req.json().catch(() => ({}));
     const key = String(body?.key || "").trim().toLowerCase();
     const label = String(body?.label || "").trim();

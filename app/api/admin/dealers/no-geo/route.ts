@@ -4,7 +4,7 @@ import { requireAdmin } from "@/app/api/_admin";
 
 export async function GET(req: Request) {
   try {
-    requireAdmin(req);
+    await requireAdmin();
     const url = new URL(req.url);
     const q = (url.searchParams.get("q") || "").trim().toLowerCase();
 

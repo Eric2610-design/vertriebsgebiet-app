@@ -20,7 +20,7 @@ export async function GET(req: Request) {
 
 export async function PUT(req: Request) {
   try {
-    requireAdmin(req);
+    await requireAdmin();
   } catch {
     return bad("admin_only", 403);
   }

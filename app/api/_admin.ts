@@ -1,23 +1,34 @@
 // app/api/_admin.ts
-// Admin check without next/headers cookies() (fixes typing issues where cookies() is Promise)
+// Central admin/superadmin check for API routes.
+// Uses next/headers cookies() (Next.js 15+ may return a Promise), so everything is async.
 
-export function getCookie(req: Request, name: string): string | undefined {
-  const raw = req.headers.get("cookie") ?? "";
-  const re = new RegExp(`(?:^|;\s*)${name}=([^;]*)`);
-  const m = raw.match(re);
-  return m ? decodeURIComponent(m[1]) : undefined;
+import { cookies } from "next/headers";
+
+export type VtRole = "rep" | "aussendienst" | "admin" | "superadmin" | "";
+
+export async function getVtCookie(name: string): Promise<string | undefined> {
+  const c = await cookies();
+  return c.get(name)?.value;
 }
 
-export function isAdminRequest(req: Request): boolean {
+export async function getVtRole(): Promise<VtRole> {
+  const role = (await getVtCookie("vt_role")) ?? "";
+  return String(role).toLowerCase() as VtRole;
+}
+
+export async function isAdmin(): Promise<boolean> {
   // Legacy support: older builds used vt_is_admin
-  const legacy = getCookie(req, "vt_is_admin") === "1";
-  // Newer builds set vt_role
-  const role = (getCookie(req, "vt_role") || "").toLowerCase();
+  const legacy = (await getVtCookie("vt_is_admin")) === "1";
+  const role = await getVtRole();
   return legacy || role === "admin" || role === "superadmin";
 }
 
-export function requireAdmin(req: Request): void {
-  if (!isAdminRequest(req)) {
+/**
+ * Throws an Error("admin_only") with status=403 if the current request is not admin.
+ * API routes should call: `await requireAdmin();`
+ */
+export async function requireAdmin(): Promise<void> {
+  if (!(await isAdmin())) {
     const err: any = new Error("admin_only");
     err.status = 403;
     throw err;

@@ -11,7 +11,7 @@ const Schema = z.object({
 
 export async function POST(req: Request) {
   try {
-    requireAdmin(req);
+    await requireAdmin();
     const body = Schema.parse(await req.json());
 
     if (!body.data_url.startsWith("data:image/")) {
