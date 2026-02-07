@@ -32,6 +32,14 @@ export default function GeoMergePage() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [sLoading, setSLoading] = useState(false);
 
+  // Force merge should be ON by default (same as buying-group merge)
+  const [forceMerge, setForceMerge] = useState(true);
+
+  // Manual master search (for cases with messy zip/city)
+  const [masterQ, setMasterQ] = useState("");
+  const [masterItems, setMasterItems] = useState<DealerRow[]>([]);
+  const [mLoading, setMLoading] = useState(false);
+
   const pageInfo = useMemo(() => ({ offset, limit }), [offset]);
 
   async function load() {
@@ -72,6 +80,7 @@ export default function GeoMergePage() {
   async function loadSuggestions(dealer: DealerRow) {
     setActive(dealer);
     setSuggestions([]);
+    setMasterItems([]);
     setSLoading(true);
     try {
       const res = await fetch(`/api/dealers/geo-suggestions?id=${encodeURIComponent(dealer.id)}`, {
@@ -90,13 +99,15 @@ export default function GeoMergePage() {
 
   async function mergeInto(masterId: string) {
     if (!active) return;
-    const ok = confirm(`Diesen Händler in den Vorschlag mergen?\n\nQuelle: ${active.name}\nMaster: ${masterId}`);
+    const ok = confirm(
+      `Diesen Händler mergen?\n\nQuelle: ${active.name}\nMaster: ${masterId}\n\nForce Merge: ${forceMerge ? "AN" : "AUS"}`
+    );
     if (!ok) return;
 
     const res = await fetch("/api/merge", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ master_id: masterId, merge_ids: [active.id], force: true, reason: "geo-merge" }),
+      body: JSON.stringify({ master_id: masterId, merge_ids: [active.id], force: forceMerge, reason: "geo-merge" }),
     });
     const js = await res.json().catch(() => ({}));
     if (!res.ok) return alert(js?.error || "Merge fehlgeschlagen");
@@ -105,6 +116,44 @@ export default function GeoMergePage() {
     setActive(null);
     setSuggestions([]);
     await load();
+  }
+
+  async function excludeActive() {
+    if (!active) return;
+    const ok = confirm(
+      `Diesen Händler von der Geo-Merge-Liste ausschließen (kein passendes Match)?\n\n${active.name}\n${fmtAddr(active)}`
+    );
+    if (!ok) return;
+    const res = await fetch("/api/dealers/geo-exclude", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dealer_id: active.id, reason: "geo-no-match" }),
+    });
+    const js = await res.json().catch(() => ({}));
+    if (!res.ok) return alert(js?.error || "Ausschließen fehlgeschlagen");
+    setActive(null);
+    setSuggestions([]);
+    setMasterItems([]);
+    await load();
+  }
+
+  async function searchMasters() {
+    if (!active) return;
+    setMLoading(true);
+    try {
+      const res = await fetch(
+        `/api/dealers/geo-master-search?id=${encodeURIComponent(active.id)}&q=${encodeURIComponent(masterQ.trim())}&limit=25`,
+        { cache: "no-store" }
+      );
+      const js = await res.json();
+      if (!res.ok) throw new Error(js?.error || "Master-Suche fehlgeschlagen");
+      setMasterItems(js.items || []);
+    } catch (e: any) {
+      setMasterItems([]);
+      alert(e?.message || "Master-Suche fehlgeschlagen");
+    } finally {
+      setMLoading(false);
+    }
   }
 
   function fmtAddr(d: DealerRow) {
@@ -191,7 +240,7 @@ export default function GeoMergePage() {
           <CardHeader className="flex items-center justify-between">
             <div>
               <div className="font-medium">Vorschläge / Merge</div>
-              <div className="text-sm text-slate-600">Wähle einen Master mit Geodaten.</div>
+              <div className="text-sm text-slate-600">Wähle einen Master mit Geodaten. Force Merge ist standardmäßig an.</div>
             </div>
             <Badge>{sLoading ? "sucht…" : suggestions.length ? `${suggestions.length} Vorschläge` : "bereit"}</Badge>
           </CardHeader>
@@ -202,6 +251,18 @@ export default function GeoMergePage() {
                 <div className="font-medium text-sm">{active.name}</div>
                 <div className="text-xs text-slate-600">{fmtAddr(active)}</div>
                 <div className="text-xs text-slate-500 mt-1">ID: {active.id}</div>
+
+                <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
+                  <label className="text-xs text-slate-600 flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={forceMerge}
+                      onChange={(e) => setForceMerge(e.target.checked)}
+                    />
+                    Force Merge
+                  </label>
+                  <Button variant="secondary" onClick={excludeActive}>Kein Match / Ausschließen</Button>
+                </div>
               </div>
             ) : (
               <div className="text-sm text-slate-600">Klicke links einen Händler an.</div>
@@ -209,8 +270,34 @@ export default function GeoMergePage() {
 
             {active && !sLoading && suggestions.length === 0 ? (
               <div className="text-sm text-slate-600">
-                Keine Vorschläge gefunden. (Bei verrutschten PLZ/Ort-Daten kannst du über die Suche links einen passenden
-                Master öffnen und dann manuell mergen.)
+                Keine Vorschläge gefunden. Nutze unten die <b>Master-Suche</b> (z.B. "Lucky Bike") und merge dann per Force.
+              </div>
+            ) : null}
+
+            {active ? (
+              <div className="rounded-xl border p-3 space-y-2">
+                <div className="text-xs text-slate-600">Master manuell suchen (mit Geodaten)</div>
+                <div className="flex gap-2">
+                  <Input value={masterQ} onChange={(e) => setMasterQ(e.target.value)} placeholder="z.B. Lucky Bike" />
+                  <Button variant="secondary" onClick={searchMasters} disabled={mLoading}>
+                    {mLoading ? "…" : "Suchen"}
+                  </Button>
+                </div>
+                {masterItems.length ? (
+                  <div className="border rounded-xl divide-y max-h-[220px] overflow-auto">
+                    {masterItems.map((m) => (
+                      <div key={m.id} className="p-3 flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-medium text-sm truncate">{m.name}</div>
+                          <div className="text-xs text-slate-600 truncate">{fmtAddr(m)}</div>
+                        </div>
+                        <Button onClick={() => mergeInto(m.id)}>Merge</Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : masterQ.trim().length >= 2 && !mLoading ? (
+                  <div className="text-xs text-slate-600">Keine Treffer.</div>
+                ) : null}
               </div>
             ) : null}
 
