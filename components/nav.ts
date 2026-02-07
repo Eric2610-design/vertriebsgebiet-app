@@ -10,11 +10,6 @@ export type NavItem = {
 export const NAV_ITEMS: NavItem[] = [
   { key: "map", label: "Karte", href: "/map" },
   { key: "ad", label: "Außendienst", href: "/ad", roles: ["admin", "superadmin"] },
-  { key: "import", label: "Import", href: "/import", roles: ["admin", "superadmin"] },
-  { key: "cleanup", label: "Cleanup", href: "/cleanup", roles: ["admin", "superadmin"] },
-  { key: "bg", label: "Einkaufsverbände", href: "/admin/buying-groups", roles: ["admin", "superadmin"] },
-  { key: "manuimport", label: "Hersteller Import", href: "/admin/manufacturers-import", roles: ["admin", "superadmin"] },
-  { key: "nogeo", label: "Ohne Geodaten", href: "/admin/no-geo", roles: ["admin", "superadmin"] },
   { key: "admin", label: "Admin", href: "/admin", roles: ["admin", "superadmin"] },
 ];
 
