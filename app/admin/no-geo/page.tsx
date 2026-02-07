@@ -49,9 +49,10 @@ export default function AdminNoGeoPage() {
   const rows = useMemo(() => items, [items]);
 
   const exportUrl = useMemo(() => {
-    const u = new URL("/api/admin/dealers/no-geo/export", window.location.origin);
-    if (q.trim()) u.searchParams.set("q", q.trim());
-    return u.toString();
+    // IMPORTANT: avoid referencing `window` during SSR/prerender.
+    // Use a relative URL so Next.js can safely prerender this client page.
+    const qs = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : "";
+    return `/api/admin/dealers/no-geo/export${qs}`;
   }, [q]);
 
   const doImport = async () => {
