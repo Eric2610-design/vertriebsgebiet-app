@@ -1,6 +1,7 @@
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
 import { normText } from "@/lib/normalize";
+import { requireAdmin } from "@/app/api/_admin";
 
 function normCountryIso(raw: unknown): string {
   const s = String(raw ?? "").trim().toLowerCase();
@@ -68,6 +69,7 @@ function scoreCandidate(t: any, c: any) {
 }
 
 export async function GET(req: Request) {
+  await requireAdmin();
   const supabase = supabaseService();
   const url = new URL(req.url);
   const id = (url.searchParams.get("id") ?? "").trim();

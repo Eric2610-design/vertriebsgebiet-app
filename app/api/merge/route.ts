@@ -2,6 +2,7 @@ import { z } from "zod";
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
 import { normText } from "@/lib/normalize";
+import { requireAdmin } from "@/app/api/_admin";
 
 const BodySchema = z.object({
   master_id: z.string().uuid(),
@@ -161,6 +162,7 @@ async function moveForeignKeys(supabase: ReturnType<typeof supabaseService>, mas
 
 export async function POST(req: Request) {
   try {
+    await requireAdmin();
     const supabase = supabaseService();
     const body = BodySchema.parse(await req.json());
 
@@ -237,8 +239,27 @@ export async function POST(req: Request) {
       }
     }
 
-    const { error: delErr } = await supabase.from("dealers").delete().in("id", mergeIds);
-    if (delErr) return bad(delErr.message, 500);
+    // Prefer soft-merge (keeps history + enables admin reporting)
+    const mergedStatus = body.force ? "merged_force" : "merged";
+    try {
+      const { error: upErr } = await supabase
+        .from("dealers")
+        .update({ status: mergedStatus, merged_into: body.master_id } as any)
+        .in("id", mergeIds);
+
+      if (upErr) {
+        // Backwards fallback: if schema doesn't have the soft-merge columns, do a hard delete
+        if (/column .*merged_into/i.test(upErr.message) || /column .*status/i.test(upErr.message)) {
+          const { error: delErr } = await supabase.from("dealers").delete().in("id", mergeIds);
+          if (delErr) return bad(delErr.message, 500);
+        } else {
+          return bad(upErr.message, 500);
+        }
+      }
+    } catch (e: any) {
+      const { error: delErr } = await supabase.from("dealers").delete().in("id", mergeIds);
+      if (delErr) return bad(delErr.message, 500);
+    }
 
     return ok({ ok: true, master_id: body.master_id, merged: mergeIds });
   } catch (e: any) {

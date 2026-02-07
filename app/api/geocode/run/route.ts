@@ -1,12 +1,14 @@
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
 import { joinAddress } from "@/lib/normalize";
+import { requireAdmin } from "@/app/api/_admin";
 
 async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
 export async function POST() {
+  await requireAdmin();
   const supabase = supabaseService();
 
   const { data: dealers, error } = await supabase

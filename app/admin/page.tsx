@@ -1,284 +1,330 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Card, CardContent, CardHeader, Button, Input, Badge } from "@/components/ui";
-import { Pictogram } from "@/components/Pictogram";
-import RequireRole from "@/components/RequireRole";
+import { useEffect, useMemo, useState } from "react";
+import { Badge, Button, Card, CardContent, CardHeader, Input } from "@/components/ui";
 
-type SettingRow = { key: string; value: any; updated_at?: string };
+type DealerRow = {
+  id: string;
+  name: string;
+  street: string | null;
+  zip: string | null;
+  city: string | null;
+  country: string | null;
+  country_iso: string | null;
+  lat: number | null;
+  lng: number | null;
+};
 
-export default function AdminPage() {
-  const [months, setMonths] = useState<string>("18");
-  const [loading, setLoading] = useState<boolean>(true);
-  const [saving, setSaving] = useState<boolean>(false);
-  const [msg, setMsg] = useState<string>("");
+type Suggestion = DealerRow & { score?: number; name_score?: number };
 
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [manus, setManus] = useState<any[]>([]);
-  const [groups, setGroups] = useState<any[]>([]);
+export default function GeoMergePage() {
+  const [items, setItems] = useState<DealerRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string>("");
+  const [stats, setStats] = useState<{ total_scanned?: number; total_matches?: number } | null>(null);
+
+  const [q, setQ] = useState("");
+  const [offset, setOffset] = useState(0);
+  const limit = 150;
+
+  const [active, setActive] = useState<DealerRow | null>(null);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [sLoading, setSLoading] = useState(false);
+
+  // Force merge should be ON by default (same as buying-group merge)
+  const [forceMerge, setForceMerge] = useState(true);
+
+  // Manual master search (for cases with messy zip/city)
+  const [masterQ, setMasterQ] = useState("");
+  const [masterItems, setMasterItems] = useState<DealerRow[]>([]);
+  const [mLoading, setMLoading] = useState(false);
+
+  const pageInfo = useMemo(() => ({ offset, limit }), [offset]);
+
+  async function load() {
+    setErr("");
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `/api/dealers/no-geo?only_match=1&scan=2500&limit=${limit}&offset=${offset}&q=${encodeURIComponent(q.trim())}`,
+        { cache: "no-store" }
+      );
+      const js = await res.json();
+      if (!res.ok) throw new Error(js?.error || "Fehler beim Laden");
+      setItems(js.items || []);
+      setStats({ total_scanned: js.total_scanned, total_matches: js.total_matches });
+    } catch (e: any) {
+      setErr(e?.message || "Fehler beim Laden");
+      setItems([]);
+      setStats(null);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const me = await fetch("/api/auth/me", { cache: "no-store" });
-        const mj = await me.json().catch(() => ({}));
-        if (alive) setIsAdmin(!!mj?.is_admin);
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offset]);
 
-        const res = await fetch(`/api/settings?key=flyer_active_threshold_months`, { cache: "no-store" });
-        const j = await res.json();
-        if (!alive) return;
-        const row: SettingRow | null = j?.setting ?? null;
-        const v = row?.value;
-        if (typeof v === "number") setMonths(String(v));
-        else if (typeof v === "string") setMonths(v);
-        else if (v?.value !== undefined) setMonths(String(v.value));
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setOffset(0);
+      load();
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
 
-        // Pictograms overview
-        const [mRes, gRes] = await Promise.all([
-          fetch("/api/manufacturers/list", { cache: "no-store" }),
-          fetch("/api/buying-groups/list", { cache: "no-store" }),
-        ]);
-        const mJ = await mRes.json().catch(() => ({}));
-        const gJ = await gRes.json().catch(() => ({}));
-        if (alive) {
-          setManus(mJ?.items ?? []);
-          setGroups(gJ?.items ?? []);
-        }
-      } catch {
-        // ignore
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  async function loadPictograms() {
+  async function loadSuggestions(dealer: DealerRow) {
+    setActive(dealer);
+    setSuggestions([]);
+    setMasterItems([]);
+    setSLoading(true);
     try {
-      const [mRes, gRes] = await Promise.all([
-        fetch("/api/manufacturers/list", { cache: "no-store" }),
-        fetch("/api/buying-groups/list", { cache: "no-store" }),
-      ]);
-      const mJ = await mRes.json();
-      const gJ = await gRes.json();
-      setManus(mJ.items || []);
-      setGroups(gJ.items || []);
-    } catch {
-      setManus([]);
-      setGroups([]);
+      const res = await fetch(`/api/dealers/geo-suggestions?id=${encodeURIComponent(dealer.id)}`, {
+        cache: "no-store",
+      });
+      const js = await res.json();
+      if (!res.ok) throw new Error(js?.error || "Fehler bei Vorschlägen");
+      setSuggestions(js.items || []);
+    } catch (e: any) {
+      setSuggestions([]);
+      alert(e?.message || "Fehler bei Vorschlägen");
+    } finally {
+      setSLoading(false);
     }
   }
 
-  async function upload(kind: "manufacturer" | "buying_group", key: string, file: File) {
-    const reader = new FileReader();
-    const dataUrl: string = await new Promise((resolve, reject) => {
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error("Lesen fehlgeschlagen"));
-      reader.readAsDataURL(file);
-    });
+  async function mergeInto(masterId: string) {
+    if (!active) return;
+    const ok = confirm(
+      `Diesen Händler mergen?\n\nQuelle: ${active.name}\nMaster: ${masterId}\n\nForce Merge: ${forceMerge ? "AN" : "AUS"}`
+    );
+    if (!ok) return;
 
-    const res = await fetch("/api/pictograms/upload", {
+    const res = await fetch("/api/merge", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind, key, data_url: dataUrl }),
+      body: JSON.stringify({
+        master_id: masterId,
+        merge_ids: [active.id],
+        force: forceMerge,
+        reason: forceMerge ? "geo-merge-force" : "geo-merge",
+      }),
     });
     const js = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(js?.error || "Upload fehlgeschlagen");
-    await loadPictograms();
+    if (!res.ok) return alert(js?.error || "Merge fehlgeschlagen");
+
+    // refresh list + keep modal on next item
+    setActive(null);
+    setSuggestions([]);
+    await load();
   }
 
-  const monthsNum = useMemo(() => {
-    const n = parseInt(months, 10);
-    return Number.isFinite(n) ? n : NaN;
-  }, [months]);
+  async function excludeActive() {
+    if (!active) return;
+    const ok = confirm(
+      `Diesen Händler von der Geo-Merge-Liste ausschließen (kein passendes Match)?\n\n${active.name}\n${fmtAddr(active)}`
+    );
+    if (!ok) return;
+    const res = await fetch("/api/dealers/geo-exclude", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dealer_id: active.id, reason: "geo-no-match" }),
+    });
+    const js = await res.json().catch(() => ({}));
+    if (!res.ok) return alert(js?.error || "Ausschließen fehlgeschlagen");
+    setActive(null);
+    setSuggestions([]);
+    setMasterItems([]);
+    await load();
+  }
 
-  async function save() {
-    setMsg("");
-    if (!Number.isFinite(monthsNum) || monthsNum < 1 || monthsNum > 120) {
-      setMsg("Bitte eine Zahl zwischen 1 und 120 eingeben.");
-      return;
-    }
-    setSaving(true);
+  async function searchMasters() {
+    if (!active) return;
+    setMLoading(true);
     try {
-      const res = await fetch(`/api/settings`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ key: "flyer_active_threshold_months", value: monthsNum }),
-      });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j?.error ?? "Speichern fehlgeschlagen");
-      setMsg("Gespeichert.");
+      const res = await fetch(
+        `/api/dealers/geo-master-search?id=${encodeURIComponent(active.id)}&q=${encodeURIComponent(masterQ.trim())}&limit=25`,
+        { cache: "no-store" }
+      );
+      const js = await res.json();
+      if (!res.ok) throw new Error(js?.error || "Master-Suche fehlgeschlagen");
+      setMasterItems(js.items || []);
     } catch (e: any) {
-      setMsg(e?.message ?? "Speichern fehlgeschlagen");
+      setMasterItems([]);
+      alert(e?.message || "Master-Suche fehlgeschlagen");
     } finally {
-      setSaving(false);
+      setMLoading(false);
     }
+  }
+
+  function fmtAddr(d: DealerRow) {
+    return [d.street, [d.zip, d.city].filter(Boolean).join(" "), d.country_iso || d.country].filter(Boolean).join(" · ");
   }
 
   return (
-    <RequireRole allow={["admin", "superadmin"]}>
-      <div className="max-w-5xl mx-auto">
-        <div className="flex items-center justify-between gap-3 mb-6">
-          <div>
-            <h1 className="text-xl font-semibold">Admin</h1>
-            <p className="text-slate-600 text-sm">Zentrale Verwaltung & Einstellungen.</p>
-          </div>
+    <main className="p-4 md:p-8 max-w-6xl mx-auto">
+      <div className="flex items-center justify-between gap-3 mb-6">
+        <div>
+          <h1 className="text-xl font-semibold">Händler ohne Geodaten</h1>
+          <p className="text-slate-600 text-sm">PLZ-sortiert · Vorschläge mit Ähnlichkeit · Merge wie beim Einkaufsverband.</p>
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6">
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-sm font-semibold">Import</div>
-              <div className="text-xs text-slate-600 mt-1">Dateien hochladen & Daten aktualisieren.</div>
-              <Link href="/import"><Button className="mt-3" variant="secondary">Öffnen</Button></Link>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-sm font-semibold">Cleanup</div>
-              <div className="text-xs text-slate-600 mt-1">Duplikate prüfen & zusammenführen.</div>
-              <Link href="/cleanup"><Button className="mt-3" variant="secondary">Öffnen</Button></Link>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-sm font-semibold">Einkaufsverbände</div>
-              <div className="text-xs text-slate-600 mt-1">Anlegen, löschen, Händler zuordnen.</div>
-              <Link href="/admin/buying-groups"><Button className="mt-3" variant="secondary">Öffnen</Button></Link>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-sm font-semibold">Ohne Geodaten</div>
-              <div className="text-xs text-slate-600 mt-1">PLZ-sortiert · Vorschläge · Merge wie Einkaufsverband.</div>
-              <Link href="/admin/geo-merge"><Button className="mt-3" variant="secondary">Öffnen</Button></Link>
-            </CardContent>
-          </Card>
+        <div className="flex gap-2">
+          <Link href="/admin" className="text-sm text-blue-600 hover:underline">Admin</Link>
+          <Link href="/admin/geo-merge/overview" className="text-sm text-blue-600 hover:underline">Übersicht</Link>
         </div>
+      </div>
 
-      <Card>
-        <CardHeader className="flex items-center justify-between">
-          <div>
-            <div className="font-medium">Flyer-Status: Aktiv-Schwelle</div>
-            <div className="text-sm text-slate-600">
-              Wenn ein Händler nur Rechnungen hat, wird bei der Klärliste „aktiv“ vorgeschlagen, wenn die letzte Rechnung jünger als diese Monate ist.
-            </div>
-          </div>
-          <Badge className="ml-3">{loading ? "lädt…" : "bereit"}</Badge>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex items-end gap-3 flex-wrap">
-            <div className="w-40">
-              <label className="text-sm text-slate-700">Monate</label>
-              <Input value={months} onChange={(e) => setMonths(e.target.value)} placeholder="18" />
-            </div>
-            <Button onClick={save} disabled={saving || loading}>
-              {saving ? "Speichert…" : "Speichern"}
-            </Button>
-          </div>
-          {msg ? <div className="text-sm text-slate-700">{msg}</div> : null}
+      {err ? <div className="text-sm text-red-700 mb-4">{err}</div> : null}
 
-          <div className="text-xs text-slate-500">
-            Hinweis: Diese Einstellung beeinflusst nur den Vorschlag in der Import-Klärliste. Du kannst jeden Händler dort trotzdem manuell auf aktiv/ehemalig/ignorieren setzen.
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card>
           <CardHeader className="flex items-center justify-between">
             <div>
-              <div className="font-medium">Hersteller-Pictogramme</div>
-              <div className="text-sm text-slate-600">Fehlende Icons hochladen (nur Admin).</div>
+              <div className="font-medium">Liste ohne Geodaten</div>
+              <div className="text-sm text-slate-600">Sortiert nach PLZ. Klick öffnet Vorschläge.</div>
             </div>
-            <Badge>{manus.length}</Badge>
+            <Badge>
+              {loading
+                ? "lädt…"
+                : stats?.total_matches != null
+                  ? `${items.length} / ${limit} (Matches: ${stats.total_matches})`
+                  : `${items.length} / ${limit}`}
+            </Badge>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {manus.length ? (
-              manus.map((m) => (
-                <div key={m.key} className="flex items-center justify-between gap-3 rounded-xl border p-2">
-                  <div className="flex items-center gap-2">
-                    <Pictogram kind="manufacturer" k={m.key} label={m.label} dataUrl={m.icon_data_url} size={22} />
-                    <div>
-                      <div className="text-sm font-medium">{m.label}</div>
-                      <div className="text-xs text-slate-600">Key: {m.key}</div>
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap gap-2 items-end justify-between">
+              <div className="max-w-md flex-1">
+                <label className="text-sm text-slate-700">Suche (Name)</label>
+                <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="z.B. Lucky Bike" />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  disabled={offset === 0 || loading}
+                  onClick={() => setOffset(Math.max(0, offset - limit))}
+                >
+                  Zurück
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={items.length < limit || loading}
+                  onClick={() => setOffset(offset + limit)}
+                >
+                  Weiter
+                </Button>
+              </div>
+            </div>
+
+            <div className="border rounded-xl divide-y max-h-[560px] overflow-auto">
+              {(items || []).map((d) => (
+                <button
+                  key={d.id}
+                  onClick={() => loadSuggestions(d)}
+                  className={`w-full text-left p-3 hover:bg-slate-50 ${active?.id === d.id ? "bg-slate-50" : ""}`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm truncate">{d.name}</div>
+                      <div className="text-xs text-slate-600 truncate">{fmtAddr(d)}</div>
                     </div>
+                    <div className="text-xs text-slate-500">{String(d.zip ?? "").padStart(5, " ")}</div>
                   </div>
-                  {isAdmin ? (
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={async (e) => {
-                        const f = e.target.files?.[0];
-                        if (!f) return;
-                        try {
-                          await upload("manufacturer", m.key, f);
-                        } catch (err: any) {
-                          alert(err?.message || "Upload fehlgeschlagen");
-                        } finally {
-                          e.target.value = "";
-                        }
-                      }}
-                    />
-                  ) : null}
-                </div>
-              ))
-            ) : (
-              <div className="text-sm text-slate-600">Keine Hersteller vorhanden.</div>
-            )}
+                </button>
+              ))}
+              {!items.length && !loading ? <div className="p-4 text-sm text-slate-600">Keine Treffer.</div> : null}
+            </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex items-center justify-between">
             <div>
-              <div className="font-medium">Einkaufsverbände-Pictogramme</div>
-              <div className="text-sm text-slate-600">Fehlende Icons hochladen (nur Admin).</div>
+              <div className="font-medium">Vorschläge / Merge</div>
+              <div className="text-sm text-slate-600">Wähle einen Master mit Geodaten. Force Merge ist standardmäßig an.</div>
             </div>
-            <Badge>{groups.length}</Badge>
+            <Badge>{sLoading ? "sucht…" : suggestions.length ? `${suggestions.length} Vorschläge` : "bereit"}</Badge>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {groups.length ? (
-              groups.map((g) => (
-                <div key={g.key} className="flex items-center justify-between gap-3 rounded-xl border p-2">
-                  <div className="flex items-center gap-2">
-                    <Pictogram kind="buying_group" k={g.key} label={g.label} dataUrl={g.icon_data_url} size={22} />
-                    <div>
-                      <div className="text-sm font-medium">{g.label}</div>
-                      <div className="text-xs text-slate-600">Key: {g.key}</div>
+          <CardContent className="space-y-3">
+            {active ? (
+              <div className="rounded-xl border p-3">
+                <div className="text-xs text-slate-600">Quelle (ohne Geo)</div>
+                <div className="font-medium text-sm">{active.name}</div>
+                <div className="text-xs text-slate-600">{fmtAddr(active)}</div>
+                <div className="text-xs text-slate-500 mt-1">ID: {active.id}</div>
+
+                <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
+                  <label className="text-xs text-slate-600 flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={forceMerge}
+                      onChange={(e) => setForceMerge(e.target.checked)}
+                    />
+                    Force Merge
+                  </label>
+                  <Button variant="secondary" onClick={excludeActive}>Kein Match / Ausschließen</Button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-slate-600">Klicke links einen Händler an.</div>
+            )}
+
+            {active && !sLoading && suggestions.length === 0 ? (
+              <div className="text-sm text-slate-600">
+                Keine Vorschläge gefunden. Nutze unten die <b>Master-Suche</b> (z.B. "Lucky Bike") und merge dann per Force.
+              </div>
+            ) : null}
+
+            {active ? (
+              <div className="rounded-xl border p-3 space-y-2">
+                <div className="text-xs text-slate-600">Master manuell suchen (mit Geodaten)</div>
+                <div className="flex gap-2">
+                  <Input value={masterQ} onChange={(e) => setMasterQ(e.target.value)} placeholder="z.B. Lucky Bike" />
+                  <Button variant="secondary" onClick={searchMasters} disabled={mLoading}>
+                    {mLoading ? "…" : "Suchen"}
+                  </Button>
+                </div>
+                {masterItems.length ? (
+                  <div className="border rounded-xl divide-y max-h-[220px] overflow-auto">
+                    {masterItems.map((m) => (
+                      <div key={m.id} className="p-3 flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-medium text-sm truncate">{m.name}</div>
+                          <div className="text-xs text-slate-600 truncate">{fmtAddr(m)}</div>
+                        </div>
+                        <Button onClick={() => mergeInto(m.id)}>Merge</Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : masterQ.trim().length >= 2 && !mLoading ? (
+                  <div className="text-xs text-slate-600">Keine Treffer.</div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="border rounded-xl divide-y max-h-[560px] overflow-auto">
+              {suggestions.map((s) => (
+                <div key={s.id} className="p-3 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-medium text-sm truncate">{s.name}</div>
+                    <div className="text-xs text-slate-600 truncate">{fmtAddr(s)}</div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      Score: {Number(s.score ?? 0).toFixed(3)} · Name: {Number(s.name_score ?? 0).toFixed(3)}
                     </div>
                   </div>
-                  {isAdmin ? (
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={async (e) => {
-                        const f = e.target.files?.[0];
-                        if (!f) return;
-                        try {
-                          await upload("buying_group", g.key, f);
-                        } catch (err: any) {
-                          alert(err?.message || "Upload fehlgeschlagen");
-                        } finally {
-                          e.target.value = "";
-                        }
-                      }}
-                    />
-                  ) : null}
+                  <div className="flex flex-col gap-2 items-end">
+                    <Button onClick={() => mergeInto(s.id)}>Merge</Button>
+                    <div className="text-xs text-slate-500">Geo: {s.lat?.toFixed?.(5)},{" "}{s.lng?.toFixed?.(5)}</div>
+                  </div>
                 </div>
-              ))
-            ) : (
-              <div className="text-sm text-slate-600">Keine Einkaufsverbände vorhanden.</div>
-            )}
+              ))}
+            </div>
           </CardContent>
         </Card>
       </div>
-      </div>
-    </RequireRole>
+    </main>
   );
 }

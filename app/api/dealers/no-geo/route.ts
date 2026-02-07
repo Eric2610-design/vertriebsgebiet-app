@@ -1,6 +1,7 @@
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
 import { normText } from "@/lib/normalize";
+import { requireAdmin } from "@/app/api/_admin";
 
 function extractHouseNumber(street: string | null) {
   const m = String(street ?? "").match(/\b(\d+)\s*([a-z])?\b/i);
@@ -69,6 +70,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 }
 
 export async function GET(req: Request) {
+  await requireAdmin();
   const supabase = supabaseService();
   const url = new URL(req.url);
   const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") ?? "100", 10) || 100, 1), 500);

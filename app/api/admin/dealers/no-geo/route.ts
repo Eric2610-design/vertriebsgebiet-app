@@ -1,34 +1,66 @@
-import { supabaseService } from "@/lib/supabase";
-import { ok, bad } from "@/app/api/_util";
 import { requireAdmin } from "@/app/api/_admin";
+import { supabaseService } from "@/lib/supabase";
+import { coordsMatchCountry } from "@/lib/geo/countryBounds";
 
-export async function GET(req: Request) {
-  try {
-    await requireAdmin();
-    const url = new URL(req.url);
-    const q = (url.searchParams.get("q") || "").trim().toLowerCase();
+type Update = { id: string; lat: number; lng: number };
 
-    const supabase = supabaseService();
-    // Dealers without coordinates (lat or lng missing)
-    let query = supabase
-      .from("dealers")
-      .select("id,name,street,zip,city,country,phone,email,website,opening_hours,lat,lng,geocode_status,buying_group_key,updated_at")
-      .or("lat.is.null,lng.is.null")
-      .order("updated_at", { ascending: false })
-      .limit(5000);
+export async function POST(req: Request) {
+  await requireAdmin();
+  const body = await req.json().catch(() => ({}));
+  const updates: Update[] = Array.isArray(body?.updates)
+    ? body.updates
+        .map((u: any) => ({ id: String(u?.id ?? "").trim(), lat: Number(u?.lat), lng: Number(u?.lng) }))
+        .filter((u: Update) => u.id && Number.isFinite(u.lat) && Number.isFinite(u.lng))
+    : [];
 
-    const { data, error } = await query;
-    if (error) return bad(error.message, 500);
-
-    const items = (data ?? []).filter((d: any) => {
-      if (!q) return true;
-      const hay = `${d.name ?? ""} ${d.street ?? ""} ${d.zip ?? ""} ${d.city ?? ""}`.toLowerCase();
-      return hay.includes(q);
+  if (!updates.length) {
+    return new Response(JSON.stringify({ ok: true, updated: 0, skipped: 0, invalid_country: [] }), {
+      headers: { "content-type": "application/json" },
     });
-
-    return ok({ items });
-  } catch (e: any) {
-    const status = e?.status === 403 ? 403 : 500;
-    return bad(e?.message ?? "Failed", status);
   }
+
+  const supabase = supabaseService();
+
+  // Load country of dealers
+  const ids = updates.map((u) => u.id);
+  const { data: dealers, error: dErr } = await supabase.from("dealers").select("id,country").in("id", ids);
+  if (dErr) {
+    return new Response(JSON.stringify({ error: dErr.message }), { status: 500 });
+  }
+  const countryById = new Map<string, string | null>();
+  for (const d of dealers ?? []) countryById.set((d as any).id, (d as any).country ?? null);
+
+  const invalid_country: { id: string; country: string | null; lat: number; lng: number }[] = [];
+  const not_found: string[] = [];
+  let updated = 0;
+  let skipped = 0;
+
+  for (const u of updates) {
+    if (!countryById.has(u.id)) {
+      not_found.push(u.id);
+      skipped++;
+      continue;
+    }
+    const country = countryById.get(u.id) ?? null;
+    const check = coordsMatchCountry(country, u.lat, u.lng);
+    if (!check.ok) {
+      invalid_country.push({ id: u.id, country, lat: u.lat, lng: u.lng });
+      skipped++;
+      continue;
+    }
+
+    const { error } = await supabase
+      .from("dealers")
+      .update({ lat: u.lat, lng: u.lng, geocode_status: "manual", last_geocoded_at: new Date().toISOString() } as any)
+      .eq("id", u.id);
+    if (error) {
+      skipped++;
+      continue;
+    }
+    updated++;
+  }
+
+  return new Response(JSON.stringify({ ok: true, updated, skipped, invalid_country, not_found }), {
+    headers: { "content-type": "application/json" },
+  });
 }

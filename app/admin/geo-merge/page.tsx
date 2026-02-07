@@ -107,7 +107,12 @@ export default function GeoMergePage() {
     const res = await fetch("/api/merge", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ master_id: masterId, merge_ids: [active.id], force: forceMerge, reason: "geo-merge" }),
+      body: JSON.stringify({
+        master_id: masterId,
+        merge_ids: [active.id],
+        force: forceMerge,
+        reason: forceMerge ? "geo-merge-force" : "geo-merge",
+      }),
     });
     const js = await res.json().catch(() => ({}));
     if (!res.ok) return alert(js?.error || "Merge fehlgeschlagen");
@@ -168,9 +173,8 @@ export default function GeoMergePage() {
           <p className="text-slate-600 text-sm">PLZ-sortiert · Vorschläge mit Ähnlichkeit · Merge wie beim Einkaufsverband.</p>
         </div>
         <div className="flex gap-2">
-          <Link href="/map" className="text-sm text-blue-600 hover:underline">Zur Karte</Link>
-          <Link href="/cleanup" className="text-sm text-blue-600 hover:underline">Cleanup</Link>
           <Link href="/admin" className="text-sm text-blue-600 hover:underline">Admin</Link>
+          <Link href="/admin/geo-merge/overview" className="text-sm text-blue-600 hover:underline">Übersicht</Link>
         </div>
       </div>
 

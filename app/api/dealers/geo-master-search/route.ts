@@ -1,7 +1,9 @@
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
+import { requireAdmin } from "@/app/api/_admin";
 
 export async function GET(req: Request) {
+  await requireAdmin();
   const supabase = supabaseService();
   const url = new URL(req.url);
   const id = (url.searchParams.get("id") ?? "").trim();

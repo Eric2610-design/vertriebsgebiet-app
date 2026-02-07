@@ -9,15 +9,31 @@ export async function GET(req: Request) {
   if (!q) return ok({ items: [] });
 
   // Case-insensitive search by name; keep it small for dropdowns.
-  const { data, error } = await supabase
+  let query = supabase
     .from("dealers")
     .select(
       "id,name,street,zip,city,country,parent_dealer_id,branch_label,buying_group_key,dealer_manufacturers(manufacturer_key)"
     )
     .ilike("name", `%${q}%`)
+    .not("status", "in", "(merged,merged_force,excluded)")
     .order("name", { ascending: true })
     .limit(25);
 
+  let { data, error } = await query;
+
+  if (error && /column .*status/i.test(error.message)) {
+    const retry = await supabase
+      .from("dealers")
+      .select(
+        "id,name,street,zip,city,country,parent_dealer_id,branch_label,buying_group_key,dealer_manufacturers(manufacturer_key)"
+      )
+      .ilike("name", `%${q}%`)
+      .order("name", { ascending: true })
+      .limit(25);
+
+    data = retry.data;
+    error = retry.error;
+  }
   if (error) return bad(error.message, 500);
 
   const items = (data ?? []).map((d: any) => {
