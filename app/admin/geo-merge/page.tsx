@@ -22,6 +22,7 @@ export default function GeoMergePage() {
   const [items, setItems] = useState<DealerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string>("");
+  const [stats, setStats] = useState<{ total_scanned?: number; total_matches?: number } | null>(null);
 
   const [q, setQ] = useState("");
   const [offset, setOffset] = useState(0);
@@ -38,15 +39,17 @@ export default function GeoMergePage() {
     setLoading(true);
     try {
       const res = await fetch(
-        `/api/dealers/no-geo?limit=${limit}&offset=${offset}&q=${encodeURIComponent(q.trim())}`,
+        `/api/dealers/no-geo?only_match=1&scan=2500&limit=${limit}&offset=${offset}&q=${encodeURIComponent(q.trim())}`,
         { cache: "no-store" }
       );
       const js = await res.json();
       if (!res.ok) throw new Error(js?.error || "Fehler beim Laden");
       setItems(js.items || []);
+      setStats({ total_scanned: js.total_scanned, total_matches: js.total_matches });
     } catch (e: any) {
       setErr(e?.message || "Fehler beim Laden");
       setItems([]);
+      setStats(null);
     } finally {
       setLoading(false);
     }
@@ -131,7 +134,13 @@ export default function GeoMergePage() {
               <div className="font-medium">Liste ohne Geodaten</div>
               <div className="text-sm text-slate-600">Sortiert nach PLZ. Klick öffnet Vorschläge.</div>
             </div>
-            <Badge>{loading ? "lädt…" : `${items.length} / ${limit}`}</Badge>
+            <Badge>
+              {loading
+                ? "lädt…"
+                : stats?.total_matches != null
+                  ? `${items.length} / ${limit} (Matches: ${stats.total_matches})`
+                  : `${items.length} / ${limit}`}
+            </Badge>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex flex-wrap gap-2 items-end justify-between">
