@@ -4,7 +4,7 @@ import { requireAdmin } from "@/app/api/_admin";
 
 export async function POST(req: Request) {
   try {
-    requireAdmin();
+    requireAdmin(req);
     const body = await req.json().catch(() => ({}));
     const id = String(body?.id || "").trim();
     const lat = Number(body?.lat);
@@ -22,6 +22,7 @@ export async function POST(req: Request) {
     if (error) return bad(error.message, 500);
     return ok({ ok: true });
   } catch (e: any) {
-    return bad(e?.message ?? "Failed", 500);
+    const status = e?.status === 403 ? 403 : 500;
+    return bad(e?.message ?? "Failed", status);
   }
 }

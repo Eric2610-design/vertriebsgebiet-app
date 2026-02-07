@@ -4,7 +4,7 @@ import { requireAdmin } from "@/app/api/_admin";
 
 export async function GET(req: Request) {
   try {
-    requireAdmin();
+    requireAdmin(req);
     const url = new URL(req.url);
     const q = (url.searchParams.get("q") || "").trim().toLowerCase();
 
@@ -28,6 +28,7 @@ export async function GET(req: Request) {
 
     return ok({ items });
   } catch (e: any) {
-    return bad(e?.message ?? "Failed", 500);
+    const status = e?.status === 403 ? 403 : 500;
+    return bad(e?.message ?? "Failed", status);
   }
 }
