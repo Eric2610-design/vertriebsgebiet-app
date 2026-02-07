@@ -174,6 +174,10 @@ export async function GET() {
 
   const suggestMaster = (arr: any[]) => {
     const sorted = [...arr].sort((a, b) => {
+      // Prefer an entry that already has geodata.
+      const aGeo = Number.isFinite(a.lat) && Number.isFinite(a.lng);
+      const bGeo = Number.isFinite(b.lat) && Number.isFinite(b.lng);
+      if (aGeo !== bGeo) return bGeo ? 1 : -1;
       const aa = (a.order_lines ?? 0) * 100000 + (a.invoice_lines ?? 0);
       const bb = (b.order_lines ?? 0) * 100000 + (b.invoice_lines ?? 0);
       if (bb !== aa) return bb - aa;

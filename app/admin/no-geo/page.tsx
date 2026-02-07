@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Badge, Button, Card, CardContent, CardHeader, Input } from "@/components/ui";
 import RequireRole from "@/components/RequireRole";
+import { coordsMatchCountry } from "@/lib/geo/countryBounds";
 
 type Dealer = {
   id: string;
@@ -26,6 +27,57 @@ export default function AdminNoGeoPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importBusy, setImportBusy] = useState(false);
+
+  type Preview = {
+    id: string;
+    lat: number;
+    lng: number;
+    dealer?: Dealer;
+    apply: boolean;
+    country_ok: boolean;
+    country_code: string | null;
+  };
+  const [preview, setPreview] = useState<Preview[]>([]);
+  const [previewMsg, setPreviewMsg] = useState<string | null>(null);
+
+  function parseCsv(text: string) {
+    const lines = text
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+    if (!lines.length) return { header: [] as string[], rows: [] as string[][] };
+    if (/^sep=/.test(lines[0].toLowerCase())) lines.shift();
+    const headerLine = lines.shift() as string;
+    const delimiter = headerLine.includes(";") && !headerLine.includes(",") ? ";" : ",";
+    const splitLine = (line: string) => {
+      const out: string[] = [];
+      let cur = "";
+      let inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          if (inQ && line[i + 1] === '"') {
+            cur += '"';
+            i++;
+          } else {
+            inQ = !inQ;
+          }
+        } else if (ch === delimiter && !inQ) {
+          out.push(cur);
+          cur = "";
+        } else {
+          cur += ch;
+        }
+      }
+      out.push(cur);
+      return out.map((v) => v.trim().replace(/^"|"$/g, ""));
+    };
+    const header = splitLine(headerLine).map((h) => h.trim());
+    const rows = lines.map(splitLine);
+    return { header, rows };
+  }
 
   const load = async () => {
     setLoading(true);
@@ -56,20 +108,86 @@ export default function AdminNoGeoPage() {
     return `/api/admin/dealers/no-geo/export${qs}`;
   }, [q]);
 
-  const doImport = async () => {
+  const readPreview = async () => {
     if (!importFile) return;
     try {
       setImportBusy(true);
-      const fd = new FormData();
-      fd.append("file", importFile);
-      const res = await fetch("/api/admin/dealers/no-geo/import", { method: "POST", body: fd });
+      setPreviewMsg(null);
+      const raw = await importFile.text();
+      const { header, rows } = parseCsv(raw);
+      if (!header.length) throw new Error("CSV ist leer.");
+      const lc = header.map((h) => h.toLowerCase());
+      const idxId = lc.findIndex((h) => ["id", "uuid"].includes(h));
+      const idxLat = lc.findIndex((h) => h === "lat" || h === "latitude");
+      const idxLng = lc.findIndex((h) => ["lng", "lon", "longitude"].includes(h));
+      if (idxId < 0 || idxLat < 0 || idxLng < 0) throw new Error("Header fehlt: id/uuid, lat, lng");
+
+      const parsed = rows
+        .map((r) => {
+          const id = String(r[idxId] ?? "").trim();
+          const lat = Number(String(r[idxLat] ?? "").trim());
+          const lng = Number(String(r[idxLng] ?? "").trim());
+          return { id, lat, lng };
+        })
+        .filter((r) => r.id && Number.isFinite(r.lat) && Number.isFinite(r.lng));
+
+      if (!parsed.length) throw new Error("Keine verwertbaren Zeilen gefunden.");
+
+      const res = await fetch("/api/admin/dealers/by-ids", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids: parsed.map((p) => p.id) }),
+      });
       const js = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(js?.error || "Import fehlgeschlagen");
-      alert(`Import OK: ${js.updated ?? 0} aktualisiert, ${js.skipped ?? 0} übersprungen`);
+      if (!res.ok) throw new Error(js?.error || "Dealer lookup fehlgeschlagen");
+      const map = new Map<string, Dealer>();
+      for (const d of js.items ?? []) map.set(d.id, d);
+
+      const pv: Preview[] = parsed.map((p) => {
+        const d = map.get(p.id);
+        const check = coordsMatchCountry(d?.country ?? null, p.lat, p.lng);
+        const ok = !!d && check.ok;
+        return {
+          id: p.id,
+          lat: p.lat,
+          lng: p.lng,
+          dealer: d,
+          apply: ok, // default: only valid & known dealers selected
+          country_ok: check.ok,
+          country_code: (check.code as any) ?? null,
+        };
+      });
+
+      setPreview(pv);
+      setPreviewMsg(`Vorschau geladen: ${pv.length} Zeilen (standardmäßig nur gültige Treffer ausgewählt).`);
+    } catch (e: any) {
+      setPreview([]);
+      setPreviewMsg(e?.message ?? "CSV konnte nicht gelesen werden.");
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const applyPreview = async () => {
+    const chosen = preview.filter((p) => p.apply && p.dealer);
+    if (!chosen.length) return alert("Bitte mindestens einen Eintrag auswählen.");
+    if (!confirm(`Geodaten anwenden?\n\nAusgewählt: ${chosen.length}`)) return;
+    try {
+      setImportBusy(true);
+      const res = await fetch("/api/admin/dealers/no-geo/apply", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ updates: chosen.map((c) => ({ id: c.id, lat: c.lat, lng: c.lng })) }),
+      });
+      const js = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(js?.error || "Anwenden fehlgeschlagen");
+      const invalid = (js.invalid_country ?? []).length;
+      alert(`OK: ${js.updated ?? 0} aktualisiert, ${js.skipped ?? 0} übersprungen${invalid ? ` (davon ${invalid} falsches Land)` : ""}`);
       setImportFile(null);
+      setPreview([]);
       await load();
     } catch (e: any) {
-      alert(e?.message ?? "Import fehlgeschlagen");
+      alert(e?.message ?? "Anwenden fehlgeschlagen");
     } finally {
       setImportBusy(false);
     }
@@ -112,13 +230,74 @@ export default function AdminNoGeoPage() {
                   className="text-sm"
                 />
               </label>
-              <Button variant="primary" className="h-9" onClick={doImport} disabled={!importFile || importBusy}>
-                {importBusy ? "Import…" : "CSV importieren"}
+              <Button variant="secondary" className="h-9" onClick={readPreview} disabled={!importFile || importBusy}>
+                {importBusy ? "Lese…" : "CSV einlesen"}
+              </Button>
+              <Button
+                variant="primary"
+                className="h-9"
+                onClick={applyPreview}
+                disabled={!preview.length || importBusy}
+              >
+                {importBusy ? "Wende an…" : "Anwenden"}
               </Button>
               <Badge tone="slate">{loading ? "…" : `${rows.length} Treffer`}</Badge>
             </div>
           </CardHeader>
           <CardContent>
+            {previewMsg ? <div className="mb-2 text-sm text-slate-700">{previewMsg}</div> : null}
+            {preview.length ? (
+              <div className="mb-4 overflow-auto rounded-xl border border-slate-200">
+                <table className="min-w-[900px] w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-left">
+                      <th className="py-2 px-2">OK</th>
+                      <th className="py-2 pr-2">Händler</th>
+                      <th className="py-2 pr-2">Land-Check</th>
+                      <th className="py-2 pr-2">Lat</th>
+                      <th className="py-2 pr-2">Lng</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.map((p) => {
+                      const name = p.dealer?.name ?? "(ID nicht gefunden)";
+                      const addr = p.dealer ? `${p.dealer.zip ?? ""} ${p.dealer.city ?? ""} ${p.dealer.country ?? ""}`.trim() : "";
+                      const landOk = p.dealer ? p.country_ok : false;
+                      return (
+                        <tr key={p.id} className="border-b border-slate-100 align-top">
+                          <td className="py-2 px-2">
+                            <input
+                              type="checkbox"
+                              checked={p.apply}
+                              disabled={!p.dealer}
+                              onChange={(e) =>
+                                setPreview((old) => old.map((x) => (x.id === p.id ? { ...x, apply: e.target.checked } : x)))
+                              }
+                            />
+                          </td>
+                          <td className="py-2 pr-2">
+                            <div className="font-semibold">{name}</div>
+                            <div className="text-xs text-slate-600">{addr}</div>
+                            <div className="text-xs text-slate-500">{p.id}</div>
+                          </td>
+                          <td className="py-2 pr-2">
+                            {!p.dealer ? (
+                              <Badge tone="rose">nicht gefunden</Badge>
+                            ) : landOk ? (
+                              <Badge tone="green">passt</Badge>
+                            ) : (
+                              <Badge tone="rose">falsches Land</Badge>
+                            )}
+                          </td>
+                          <td className="py-2 pr-2">{p.lat}</td>
+                          <td className="py-2 pr-2">{p.lng}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
             {error ? <div className="text-sm text-rose-700">{error}</div> : null}
             {loading ? (
               <div className="text-sm text-slate-600">Lade…</div>

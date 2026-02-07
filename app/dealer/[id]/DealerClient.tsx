@@ -41,6 +41,7 @@ export default function DealerClient({ id }: { id: string }) {
   const miniMapInstanceRef = useRef<Leaflet.Map | null>(null);
   const miniMarkerRef = useRef<any>(null);
   const [miniLeafletReady, setMiniLeafletReady] = useState(false);
+  const [miniMapError, setMiniMapError] = useState<string>("");
 
   const [allManufacturers, setAllManufacturers] = useState<ManufacturerItem[]>([]);
 
@@ -230,24 +231,40 @@ export default function DealerClient({ id }: { id: string }) {
     const lng = d?.lng;
     if (lat == null || lng == null) return;
 
+    setMiniMapError("");
+
     // init map once
     if (!miniMapInstanceRef.current) {
-      const map = L.map(el, {
-        zoomControl: false,
-        attributionControl: false,
-        // improves rendering inside cards / during hydration
-        preferCanvas: true,
-      });
-      miniMapInstanceRef.current = map;
+      try {
+        // Leaflet can throw "Map container is already initialized" after client-side navigations.
+        // Reset the internal marker on the container before creating a new map.
+        if ((el as any)._leaflet_id) {
+          try {
+            delete (el as any)._leaflet_id;
+          } catch {
+            (el as any)._leaflet_id = undefined;
+          }
+        }
 
-      // Use OSM tiles (HTTPS). If tiles fail to load, the map would appear blank.
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        crossOrigin: true,
-      }).addTo(map);
+        const map = L.map(el, {
+          zoomControl: false,
+          attributionControl: false,
+        });
+        miniMapInstanceRef.current = map;
+
+        // Use OSM tiles (HTTPS). If tiles fail to load, the map would appear blank.
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution: "&copy; OpenStreetMap",
+        }).addTo(map);
+      } catch (e: any) {
+        setMiniMapError(e?.message ?? "Karte konnte nicht initialisiert werden");
+        return;
+      }
 
       // Keep map responsive (fixes "white field" when container size changes)
       try {
+        const map = miniMapInstanceRef.current as any;
         const ro = new ResizeObserver(() => {
           try {
             map.invalidateSize();
@@ -627,7 +644,14 @@ Hinweis: ${sameZipForce ? "FORCE aktiv (ignoriert Adresse/Land/PLZ-Checks)." : "
               <div className="text-sm text-slate-600">Keine Koordinaten vorhanden.</div>
             ) : (
               <div className="h-[220px] w-full overflow-hidden rounded-xl border border-slate-200">
-                <div ref={miniMapRef} className="h-full w-full" />
+                <div className="relative h-full w-full">
+                  <div ref={miniMapRef} className="h-full w-full" />
+                  {miniMapError ? (
+                    <div className="absolute inset-0 flex items-center justify-center bg-white/80 text-xs text-rose-700 p-3 text-center">
+                      {miniMapError}
+                    </div>
+                  ) : null}
+                </div>
               </div>
             )}
           </CardContent>
