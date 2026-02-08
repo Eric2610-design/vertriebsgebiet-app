@@ -17,7 +17,8 @@ jobs:
       - uses: supabase/setup-cli@v1
 
       - name: Apply DB migrations (via session pooler)
-        run: supabase db push --db-url "$DB_URL"
+        run: |
+          printf "y\n" | supabase db push --db-url "$DB_URL"
 
       - name: Deploy Edge Functions (if present)
         run: |
@@ -26,4 +27,3 @@ jobs:
           else
             echo "No supabase/functions directory - skipping."
           fi
-
