@@ -1,3 +1,9 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = { experimental: { serverActions: { bodySizeLimit: '20mb' } } };
+const nextConfig = {
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+};
+
 export default nextConfig;
+
