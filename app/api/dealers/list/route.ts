@@ -1,112 +1,89 @@
-import { supabaseService } from "@/lib/supabase";
-import { ok, bad } from "@/app/api/_util";
+export const dynamic = "force-dynamic";
 
-// This endpoint is used by the map and the AD lists.
-// It must be able to return > 1,000 dealers (Supabase/PostgREST often defaults
-// to 1,000 if you don't paginate explicitly).
-//
-// Supports:
-//   - ?pageSize=5000   (max 10000)
-//   - ?includeDisabled=1
-//
-// Default behaviour: return ACTIVE master dealers (merged_into is null).
+import { NextResponse } from "next/server";
+import { createSupabaseServer } from "../../../lib/supabase/server";
+
+function clampInt(v: string | null, def: number, min: number, max: number) {
+  const n = Number.parseInt(v ?? "", 10);
+  if (!Number.isFinite(n)) return def;
+  return Math.max(min, Math.min(max, n));
+}
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 export async function GET(req: Request) {
   try {
-    const supabase = supabaseService();
-
+    const supabase = createSupabaseServer();
     const url = new URL(req.url);
-    const pageSizeParam = parseInt(url.searchParams.get("pageSize") ?? "5000", 10);
-    const pageSize = Number.isFinite(pageSizeParam) ? Math.min(Math.max(pageSizeParam, 100), 10000) : 5000;
-    const includeDisabled = url.searchParams.get("includeDisabled") === "1";
 
-    // We paginate in chunks to reliably fetch all rows.
-    const step = 1000;
-    let from = 0;
-    const all: any[] = [];
+    const limit = clampInt(url.searchParams.get("limit"), 5000, 1, 10000);
+    const offset = clampInt(url.searchParams.get("offset"), 0, 0, 200000);
 
-    // Safety cap so this endpoint can't explode accidentally.
-    const maxRows = pageSize;
+    const from = offset;
+    const to = offset + limit - 1;
 
-    while (true) {
-      let q = supabase
-        .from("dealers")
-        .select(`
-          id,name,street,zip,city,country,phone,email,website,opening_hours,lat,lng,geocode_status,notes,created_at,updated_at,
-          buying_group_key,
-          dealer_manufacturers!left(manufacturer_key)
-        `)
-        .order("name", { ascending: true })
-        .range(from, from + step - 1);
+    const { data: dealers, error: dealersError, count } = await supabase
+      .from("dealers")
+      .select(
+        "id,name,street,zip,city,country_iso,phone,email,website,opening_hours,lat,lng,geocode_status,buying_group_key,updated_at",
+        { count: "exact" }
+      )
+      .eq("status", "active")
+      .is("merged_into", null)
+      .order("name", { ascending: true })
+      .range(from, to);
 
-      // Default: only ACTIVE masters.
-      // If a schema is older and doesn't have these columns, we gracefully fallback.
-      q = q.is("merged_into", null);
-      if (!includeDisabled) q = q.eq("status", "active");
-
-      const { data, error } = await q;
-
-      // Fallback for older schemas.
-      if (error && /column .*merged_into/i.test(error.message)) {
-        // old schema: no merge feature
-        const retry = await supabase
-          .from("dealers")
-          .select(`
-            id,name,street,zip,city,country,phone,email,website,opening_hours,lat,lng,geocode_status,notes,created_at,updated_at,
-            buying_group_key,
-            dealer_manufacturers!left(manufacturer_key)
-          `)
-          .order("name", { ascending: true })
-          .range(from, from + step - 1);
-
-        if (retry.error) return bad(retry.error.message, 500);
-        if (!retry.data || retry.data.length === 0) break;
-        all.push(...retry.data);
-        if (all.length >= maxRows) break;
-        if (retry.data.length < step) break;
-        from += step;
-        continue;
-      }
-
-      if (error && /column .*status/i.test(error.message)) {
-        const retry = await supabase
-          .from("dealers")
-          .select(`
-            id,name,street,zip,city,country,phone,email,website,opening_hours,lat,lng,geocode_status,notes,created_at,updated_at,
-            buying_group_key,
-            dealer_manufacturers!left(manufacturer_key)
-          `)
-          .order("name", { ascending: true })
-          .range(from, from + step - 1);
-
-        if (retry.error) return bad(retry.error.message, 500);
-        if (!retry.data || retry.data.length === 0) break;
-        all.push(...retry.data);
-        if (all.length >= maxRows) break;
-        if (retry.data.length < step) break;
-        from += step;
-        continue;
-      }
-
-      if (error) return bad(error.message, 500);
-      if (!data || data.length === 0) break;
-
-      all.push(...data);
-
-      if (all.length >= maxRows) break;
-      if (data.length < step) break;
-      from += step;
+    if (dealersError) {
+      return NextResponse.json(
+        { error: "Dealer query failed", supabase_error: dealersError },
+        { status: 400 }
+      );
     }
 
-    const items = all.map((d: any) => {
-      const manufacturer_keys = (d.dealer_manufacturers ?? []).map((x: any) => x.manufacturer_key);
-      const has_flyer = manufacturer_keys.includes("flyer");
-      delete d.dealer_manufacturers;
-      return { ...d, has_flyer, manufacturer_keys };
-    });
+    const ids = (dealers ?? []).map((d: any) => d.id).filter(Boolean);
 
-    // Enforce cap in case the last page pushed us over.
-    return ok({ items: items.slice(0, maxRows) });
+    // Hersteller pro Dealer holen (in Chunks, damit "IN (...)" nicht zu groß wird)
+    const manufacturersByDealer = new Map<string, string[]>();
+    for (const part of chunk(ids, 900)) {
+      const { data: mans, error: mansError } = await supabase
+        .from("dealer_manufacturers")
+        .select("dealer_id,manufacturer_key,status")
+        .in("dealer_id", part)
+        .eq("status", "active");
+
+      if (mansError) {
+        return NextResponse.json(
+          { error: "Manufacturer query failed", supabase_error: mansError },
+          { status: 400 }
+        );
+      }
+
+      for (const m of mans ?? []) {
+        const did = (m as any).dealer_id as string;
+        const key = (m as any).manufacturer_key as string;
+        if (!did || !key) continue;
+        const arr = manufacturersByDealer.get(did) ?? [];
+        if (!arr.includes(key)) arr.push(key);
+        manufacturersByDealer.set(did, arr);
+      }
+    }
+
+    const items = (dealers ?? []).map((d: any) => ({
+      ...d,
+      manufacturer_keys: manufacturersByDealer.get(d.id) ?? [],
+    }));
+
+    return NextResponse.json({
+      items,
+      total: count ?? items.length,
+      limit,
+      offset,
+    });
   } catch (e: any) {
-    return bad(e?.message ?? "Failed to load dealers", 500);
+    return NextResponse.json({ error: e?.message ?? "Server error" }, { status: 500 });
   }
 }
