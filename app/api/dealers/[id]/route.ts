@@ -27,7 +27,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
   const params = await ctx.params;
   const supabase = supabaseService();
   const { data: dealer, error } = await supabase
-    .from("v_dealers_master")
+    .from("dealers")
     .select("*")
     .eq("id", params.id)
     .maybeSingle();
@@ -79,80 +79,42 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
   });
 }
 
-
 export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const params = await ctx.params;
   try {
     const supabase = supabaseService();
     const body = DealerUpdateSchema.parse(await req.json());
 
-    const dealerId = params.id;
-
     const name = body.dealer.name.trim();
     const street = body.dealer.street?.trim() ?? null;
     const city = body.dealer.city?.trim() ?? null;
     const zip = body.dealer.zip?.trim() ?? null;
 
-    // AD-/User-Eingaben sollen immer Vorrang haben:
-    // Wir schreiben sie als Overrides (nicht direkt in dealers), damit künftige Uploads sie nicht überschreiben.
-    const overrides: { dealer_id: string; field_name: string; field_value: string }[] = [];
-    const pushOv = (field_name: string, value: any) => {
-      if (value === undefined || value === null) return;
-      const v = String(value).trim();
-      if (!v) return;
-      overrides.push({ dealer_id: dealerId, field_name, field_value: v });
-    };
-
-    pushOv("name", name);
-    if (street) pushOv("street", street);
-    if (zip) pushOv("zip", zip);
-    if (city) pushOv("city", city);
-
-    // UI nutzt aktuell body.dealer.country → wir speichern als country_iso (DE/AT/CH)
-    if (body.dealer.country?.trim()) pushOv("country_iso", body.dealer.country.trim());
-
-    if (body.dealer.phone?.trim()) pushOv("phone", body.dealer.phone.trim());
-    if (body.dealer.email?.trim()) pushOv("email", body.dealer.email.trim());
-    if (body.dealer.website?.trim()) pushOv("website", body.dealer.website.trim());
-    if (body.dealer.opening_hours?.trim()) pushOv("opening_hours", body.dealer.opening_hours.trim());
-    if (body.dealer.notes?.trim()) pushOv("notes", body.dealer.notes.trim());
-
-    // Manuelle Geo-Eingabe: als Override + optional dealers.lat/lng setzen (damit es auch ohne View sichtbar ist)
-    if (typeof body.dealer.lat === "number" && typeof body.dealer.lng === "number") {
-      pushOv("lat", body.dealer.lat);
-      pushOv("lng", body.dealer.lng);
-
-      // Optional: auch am Dealer speichern (praktisch fürs Backend / Debug)
-      const { error: geoErr } = await supabase
-        .from("dealers")
-        .update({ lat: body.dealer.lat, lng: body.dealer.lng, geocode_status: "manual" })
-        .eq("id", dealerId);
-      if (geoErr) return bad(geoErr.message, 500);
-    }
-
-    if (overrides.length) {
-      const { error: oErr } = await supabase
-        .from("dealer_field_overrides")
-        .upsert(
-          overrides.map((o) => ({ ...o, updated_at: new Date().toISOString() })),
-          { onConflict: "dealer_id,field_name" }
-        );
-      if (oErr) return bad(oErr.message, 500);
-    }
-
-    // Struktur-Felder bleiben direkt auf dealers (Filialen/Parent-Beziehung)
-    const structural: any = {
-      parent_dealer_id: body.dealer.parent_dealer_id ?? null,
-      branch_label: body.dealer.branch_label?.trim() ?? null,
-      // Optional: norm_* weiterhin pflegen (hilft Matching/Debug)
+    const patch: any = {
+      name,
+      street,
+      city,
+      zip,
+      country: body.dealer.country?.trim() ?? null,
+      phone: body.dealer.phone?.trim() ?? null,
+      email: body.dealer.email?.trim() ?? null,
+      website: body.dealer.website?.trim() ?? null,
+      opening_hours: body.dealer.opening_hours?.trim() ?? null,
+      notes: body.dealer.notes?.trim() ?? null,
       norm_name: normText(name),
       norm_street: normText(street ?? ""),
       norm_city: normText(city ?? ""),
-      zipcode_int: zip ? parseInt(zip.replace(/\D/g, "").padStart(5, "0"), 10) || null : null,
-      country_iso: body.dealer.country?.trim() ?? null,
+      parent_dealer_id: body.dealer.parent_dealer_id ?? null,
+      branch_label: body.dealer.branch_label?.trim() ?? null,
     };
 
-    const { error } = await supabase.from("dealers").update(structural).eq("id", dealerId);
+    if (typeof body.dealer.lat === "number" && typeof body.dealer.lng === "number") {
+      patch.lat = body.dealer.lat;
+      patch.lng = body.dealer.lng;
+      patch.geocode_status = "manual";
+    }
+
+    const { error } = await supabase.from("dealers").update(patch).eq("id", params.id);
     if (error) return bad(error.message, 500);
 
     return ok({ ok: true });
@@ -168,4 +130,3 @@ export async function DELETE(_: Request, ctx: { params: Promise<{ id: string }> 
   if (error) return bad(error.message, 500);
   return ok({ ok: true });
 }
-
