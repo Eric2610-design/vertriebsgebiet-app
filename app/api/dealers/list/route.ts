@@ -13,16 +13,37 @@ export async function GET() {
       let q = supabase
         .from("dealers")
         .select(`
-          id,name,street,zip,city,country,country_iso,phone,email,website,opening_hours,lat,lng,geocode_status,notes,created_at,updated_at,
+          id,name,street,zip,city,country,phone,email,website,opening_hours,lat,lng,geocode_status,notes,created_at,updated_at,
           buying_group_key,
           dealer_manufacturers!left(manufacturer_key)
         `)
-        .eq("status", "active")
-        .is("merged_into", null)
         .order("name", { ascending: true })
         .range(from, from + step - 1);
 
+      // Exclude soft-merged and excluded records if the column exists.
+      // (Fallback: if older schema doesn't have status, we continue without filter.)
+      q = q.not("status", "in", "(merged,merged_force,excluded)");
+
       const { data, error } = await q;
+
+      if (error && /column .*status/i.test(error.message)) {
+        const retry = await supabase
+          .from("dealers")
+          .select(`
+            id,name,street,zip,city,country,phone,email,website,opening_hours,lat,lng,geocode_status,notes,created_at,updated_at,
+            buying_group_key,
+            dealer_manufacturers!left(manufacturer_key)
+          `)
+          .order("name", { ascending: true })
+          .range(from, from + step - 1);
+
+        if (retry.error) return bad(retry.error.message, 500);
+        if (!retry.data || retry.data.length === 0) break;
+        all.push(...retry.data);
+        if (retry.data.length < step) break;
+        from += step;
+        continue;
+      }
 
       if (error) return bad(error.message, 500);
       if (!data || data.length === 0) break;

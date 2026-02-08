@@ -14,7 +14,9 @@ function NavLink({ href, active, ...props }: { href: string; active: boolean; ch
       href={href}
       className={
         "flex items-center rounded-xl px-3 py-2 text-sm font-medium transition " +
-        (active ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100")
+        (active
+          ? "bg-white/15 text-white"
+          : "text-slate-200 hover:bg-white/10 hover:text-white")
       }
       {...props as any}
     />
@@ -37,7 +39,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const visibleItems = useMemo(() => {
     const role = me?.role ?? null;
-    return NAV_ITEMS.filter((it) => isAllowed(role, it));
+    const base = NAV_ITEMS.filter((it) => isAllowed(role, it));
+    // UX: Außendienstler sollen direkt zu ihrem Gebiet springen (statt die Admin-Übersicht /ad)
+    if ((role as any) === "aussendienst" && me?.email) {
+      const myHref = `/ad/${encodeURIComponent(me.email)}`;
+      const withoutAd = base.filter((it) => it.key !== "ad");
+      // falls später jemand "ad" doch freischaltet, ersetzen wir ihn konsequent
+      return [...withoutAd, { key: "my_area", label: "Mein Gebiet", href: myHref } as any];
+    }
+    return base;
   }, [me]);
 
   const visibleAdminItems = useMemo(() => {
@@ -61,14 +71,28 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen">
       {/* Sidebar (Desktop) */}
-      <aside className="hidden md:fixed md:inset-y-0 md:flex md:w-64 md:flex-col md:border-r md:border-slate-200 md:bg-white">
-        <div className="flex items-center gap-2 px-4 py-4">
-          <div className="h-10 w-10 rounded-2xl bg-slate-900" />
+      <aside className="hidden md:fixed md:inset-y-0 md:flex md:w-64 md:flex-col md:border-r md:border-black md:bg-black">
+        <div className="flex items-center gap-3 px-4 py-4">
+          <div className="h-10 w-10 rounded-2xl bg-white/10 flex items-center justify-center overflow-hidden">
+            <img src="/brands/flyer.png" alt="FLYER" className="h-8 w-8 object-contain" />
+          </div>
           <div className="leading-tight">
-            <div className="text-sm font-semibold">Dealer Tool</div>
-            <div className="text-xs text-slate-500">Händlerkarte</div>
+            <div className="text-sm font-semibold text-white">Dealer Tool</div>
+            <div className="text-xs text-slate-300">Händlerkarte</div>
           </div>
         </div>
+
+        <div className="px-3 pb-2">
+          <button
+            className="w-full flex items-center justify-center rounded-xl px-3 py-2 text-sm font-medium text-slate-200 hover:bg-white/10 hover:text-white transition"
+            onClick={() => router.back()}
+            type="button"
+            aria-label="Zurück"
+          >
+            ← Zurück
+          </button>
+        </div>
+
         <nav className="flex-1 px-3">
           <div className="space-y-1">
             {visibleItems.map((it) => (
@@ -98,8 +122,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             ))}
           </div>
         </nav>
-        <div className="border-t border-slate-200 px-4 py-4">
-          <div className="truncate text-xs text-slate-600">{userLabel}</div>
+        <div className="border-t border-white/10 px-4 py-4">
+          <div className="truncate text-xs text-slate-300">{userLabel}</div>
           <Button variant="secondary" className="mt-2 w-full" onClick={logout}>
             Logout
           </Button>
@@ -108,24 +132,37 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Topbar (iOS only) */}
       {isIOS && (
-        <header className="sticky top-0 z-40 flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3 md:hidden">
+        <header className="sticky top-0 z-40 flex items-center justify-between gap-2 border-b border-black bg-black px-4 py-3 md:hidden">
           <button
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white"
-            onClick={() => setMobileOpen(true)}
+            className="inline-flex h-10 px-3 items-center justify-center rounded-xl bg-white/10 text-white"
+            onClick={() => router.back()}
             type="button"
-            aria-label="Menü"
+            aria-label="Zurück"
           >
-            ☰
+            ←
           </button>
-          <div className="text-sm font-semibold">Dealer Tool</div>
-          <button
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white"
-            onClick={logout}
-            type="button"
-            aria-label="Logout"
-          >
-            ⎋
-          </button>
+          <div className="flex items-center gap-2">
+            <img src="/brands/flyer.png" alt="FLYER" className="h-6 w-6 object-contain" />
+            <div className="text-sm font-semibold text-white">Dealer Tool</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-white"
+              onClick={() => setMobileOpen(true)}
+              type="button"
+              aria-label="Menü"
+            >
+              ☰
+            </button>
+            <button
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-white"
+              onClick={logout}
+              type="button"
+              aria-label="Logout"
+            >
+              ⎋
+            </button>
+          </div>
         </header>
       )}
 
@@ -145,19 +182,31 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {mobileOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
           <div className="absolute inset-0 bg-black/30" onClick={() => setMobileOpen(false)} />
-          <div className="absolute inset-y-0 left-0 w-72 bg-white shadow-xl">
+          <div className="absolute inset-y-0 left-0 w-72 bg-black shadow-xl">
             <div className="flex items-center justify-between px-4 py-4">
               <div>
-                <div className="text-sm font-semibold">Menü</div>
-                <div className="truncate text-xs text-slate-500">{userLabel}</div>
+                <div className="text-sm font-semibold text-white">Menü</div>
+                <div className="truncate text-xs text-slate-300">{userLabel}</div>
               </div>
               <button
-                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-white"
                 onClick={() => setMobileOpen(false)}
                 type="button"
                 aria-label="Schließen"
               >
                 ✕
+              </button>
+            </div>
+            <div className="px-3 pb-2">
+              <button
+                className="w-full flex items-center justify-center rounded-xl px-3 py-2 text-sm font-medium bg-white/10 text-white"
+                onClick={() => {
+                  setMobileOpen(false);
+                  router.back();
+                }}
+                type="button"
+              >
+                ← Zurück
               </button>
             </div>
             <nav className="px-3 pb-4">
@@ -169,8 +218,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       className={
                         "flex items-center rounded-xl px-3 py-2 text-sm font-medium transition " +
                         ((pathname === it.href || pathname?.startsWith(it.href + "/"))
-                          ? "bg-slate-900 text-white"
-                          : "text-slate-700 hover:bg-slate-100")
+                          ? "bg-white/15 text-white"
+                          : "text-slate-200 hover:bg-white/10 hover:text-white")
                       }
                       onClick={() => setMobileOpen(false)}
                     >
@@ -186,8 +235,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                             className={
                               "flex items-center rounded-xl px-3 py-2 text-xs font-medium transition " +
                               ((pathname === ai.href || pathname?.startsWith(ai.href + "/"))
-                                ? "bg-slate-900 text-white"
-                                : "text-slate-700 hover:bg-slate-100")
+                                ? "bg-white/15 text-white"
+                                : "text-slate-200 hover:bg-white/10 hover:text-white")
                             }
                             onClick={() => setMobileOpen(false)}
                           >
