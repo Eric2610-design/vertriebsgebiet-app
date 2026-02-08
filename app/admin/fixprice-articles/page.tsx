@@ -1,239 +1,188 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import RequireRole from "@/components/RequireRole";
-import { Card, CardContent, CardHeader, Button, Input, Badge } from "@/components/ui";
+import { useEffect, useState } from "react";
+import RequireRole from "@/components/auth/RequireRole";
 
-type FixMap = Record<string, { motor?: string; isFixprice: boolean }>;
+type FixpriceRow = {
+  articleNo: string;
+  motor: "BOSCH" | "PANASONIC";
+};
+
+type FixpriceSettings = {
+  version: number;
+  rows: FixpriceRow[];
+};
 
 export default function FixpriceArticlesPage() {
+  const [rows, setRows] = useState<FixpriceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
 
-  const [byArticleNo, setByArticleNo] = useState<FixMap>({});
-  const [stats, setStats] = useState<any>(null);
-
-  const [search, setSearch] = useState("");
-
+  // Laden aus app_settings
   useEffect(() => {
-    let alive = true;
     (async () => {
+      setLoading(true);
       try {
-        const res = await fetch("/api/settings?key=fixprice_articles", { cache: "no-store" });
-        const j = await res.json().catch(() => ({}));
-        const v = j?.setting?.value ?? null;
-        if (!alive) return;
-        setByArticleNo((v?.byArticleNo ?? {}) as FixMap);
-        setStats(v?.source ?? null);
+        const res = await fetch("/api/settings?key=fixprice_articles");
+        const json = await res.json();
+
+        if (json?.value?.rows) {
+          setRows(json.value.rows);
+        } else {
+          setRows([]);
+        }
       } catch {
-        if (!alive) return;
-        setByArticleNo({});
-        setStats(null);
+        setRows([]);
       } finally {
-        if (alive) setLoading(false);
+        setLoading(false);
       }
     })();
-    return () => { alive = false; };
   }, []);
 
-  const items = useMemo(() => {
-    const entries = Object.entries(byArticleNo || {});
-    const q = search.trim();
-    const filtered = q ? entries.filter(([k, v]) => k.includes(q) || String(v?.motor ?? "").toUpperCase().includes(q.toUpperCase())) : entries;
-    return filtered
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .slice(0, 500); // UI guard
-  }, [byArticleNo, search]);
+  async function save() {
+    setSaving(true);
+    setMsg(null);
 
-  function setOne(art: string, patch: Partial<{ motor?: string; isFixprice: boolean }>) {
-    setByArticleNo((prev) => ({
-      ...prev,
-      [art]: { ...(prev[art] ?? { isFixprice: false }), ...patch },
-    }));
-  }
+    const payload: FixpriceSettings = {
+      version: 1,
+      rows,
+    };
 
-  function remove(art: string) {
-    setByArticleNo((prev) => {
-      const copy: any = { ...prev };
-      delete copy[art];
-      return copy;
+    const res = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        key: "fixprice_articles",
+        value: payload,
+      }),
     });
+
+    if (!res.ok) {
+      setMsg("❌ Fehler beim Speichern");
+    } else {
+      setMsg("✅ Gespeichert");
+    }
+
+    setSaving(false);
   }
 
-  function addEmpty() {
-    const art = prompt("Artikelnummer (nur Ziffern):");
-    if (!art) return;
-    const a = art.trim();
-    if (!/^\d+$/.test(a)) {
-      setMsg("Artikelnummer muss nur aus Ziffern bestehen.");
-      return;
-    }
-    setOne(a, { motor: "BOSCH", isFixprice: true });
-    setMsg("Hinzugefügt (noch nicht gespeichert).");
+  function addRow() {
+    setRows([
+      ...rows,
+      { articleNo: "", motor: "BOSCH" },
+    ]);
   }
 
-  async function saveManual() {
-    setMsg("");
-    setSaving(true);
-    try {
-      const payload = {
-        version: 1,
-        source: stats ?? { imported_at: null },
-        byArticleNo,
-      };
-      const res = await fetch("/api/settings", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ key: "fixprice_articles", value: payload }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j?.error ?? "Speichern fehlgeschlagen");
-      setMsg("Gespeichert.");
-    } catch (e: any) {
-      setMsg(e?.message ?? "Fehler");
-    } finally {
-      setSaving(false);
-    }
+  function updateRow(idx: number, patch: Partial<FixpriceRow>) {
+    setRows(
+      rows.map((r, i) => (i === idx ? { ...r, ...patch } : r))
+    );
   }
 
-  async function importFromXlsx(file: File) {
-    setMsg("");
-    setSaving(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch("/api/fixprice/import", { method: "POST", body: fd });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j?.error ?? "Import fehlgeschlagen");
-
-      const v = j?.setting?.value ?? null;
-      setByArticleNo((v?.byArticleNo ?? {}) as FixMap);
-      setStats(v?.source ?? null);
-      setMsg(`Import OK: ${v?.source?.unique_articles ?? 0} Artikel.`);
-    } catch (e: any) {
-      setMsg(e?.message ?? "Fehler");
-    } finally {
-      setSaving(false);
-    }
+  function removeRow(idx: number) {
+    setRows(rows.filter((_, i) => i !== idx));
   }
 
   return (
-    <RequireRole role="admin">
+    <RequireRole allow={["admin", "superadmin"]}>
       <div className="mx-auto max-w-6xl p-4 md:p-8 space-y-4">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
-            <div className="text-2xl font-semibold">Fixpreise · Artikel</div>
-            <div className="text-sm text-neutral-600">
-              Fixpreis-Regel: Spalte E (Preisart) in der Tabelle EK_Schwellen/EK_Stammdaten ist <Badge>nicht leer</Badge> ⇒ Fixpreis/Sonderpreis. Leer ⇒ Normalpreis.
-            </div>
+            <h1 className="text-2xl font-semibold">Fixpreis · Artikel</h1>
+            <p className="text-sm text-neutral-600">
+              Artikelnummern mit Fixpreis (aus „Regeln und Schwellen.xlsx“).
+              Spalte E ≠ leer ⇒ Fixpreis.
+            </p>
           </div>
+
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={addEmpty}>+ Artikel</Button>
-            <Button onClick={saveManual} disabled={saving}>{saving ? "Speichere…" : "Speichern"}</Button>
+            <button
+              onClick={addRow}
+              className="rounded-xl border px-3 py-2 text-sm hover:bg-neutral-50"
+            >
+              + Artikel
+            </button>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              Speichern
+            </button>
           </div>
         </div>
 
-        {msg ? (
-          <Card>
-            <CardContent className="py-3 text-sm">{msg}</CardContent>
-          </Card>
-        ) : null}
+        {msg && (
+          <div className="rounded-xl border bg-neutral-50 p-3 text-sm">
+            {msg}
+          </div>
+        )}
 
-        <Card>
-          <CardHeader title="Import aus Regeln und Schwellen.xlsx" />
-          <CardContent className="flex flex-wrap gap-3 items-center">
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) importFromXlsx(f);
-              }}
-            />
-            <div className="text-sm text-neutral-600">
-              Import schreibt nach <Badge>app_settings.fixprice_articles</Badge>.
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader title="Status" />
-          <CardContent className="text-sm text-neutral-700 space-y-1">
-            {loading ? (
-              <div className="text-neutral-600">Lade…</div>
-            ) : (
-              <>
-                <div>Artikel im Mapping: <Badge>{Object.keys(byArticleNo ?? {}).length}</Badge></div>
-                {stats ? (
-                  <div className="text-neutral-600">
-                    Letzter Import: {stats.imported_at ? String(stats.imported_at) : "—"} · Sheet: {stats.sheet ?? "—"} · Datei: {stats.filename ?? "—"}
-                  </div>
-                ) : (
-                  <div className="text-neutral-600">Noch kein Import.</div>
-                )}
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader title="Suche & Bearbeiten" />
-          <CardContent className="space-y-3">
-            <div className="flex gap-2 items-center">
-              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Artikelnummer oder Motor (Bosch/Panasonic)..." className="max-w-sm" />
-              <div className="text-xs text-neutral-500">(zeigt max. 500 Zeilen)</div>
-            </div>
-
-            <div className="overflow-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs text-neutral-500">
-                    <th className="py-2 pr-2">Artikel</th>
-                    <th className="py-2 pr-2">Motor</th>
-                    <th className="py-2 pr-2">Fixpreis?</th>
-                    <th className="py-2 pr-2"></th>
+        {loading ? (
+          <div className="text-sm text-neutral-600">Lade …</div>
+        ) : (
+          <div className="rounded-2xl border bg-white overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-neutral-50">
+                <tr>
+                  <th className="px-3 py-2 text-left">Artikelnummer</th>
+                  <th className="px-3 py-2 text-left">Motor</th>
+                  <th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={3}
+                      className="px-3 py-6 text-center text-neutral-500"
+                    >
+                      Keine Fixpreis-Artikel hinterlegt
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {items.map(([art, v]) => (
-                    <tr key={art} className="border-t">
-                      <td className="py-2 pr-2 font-mono">{art}</td>
-                      <td className="py-2 pr-2">
-                        <select
-                          className="rounded-lg border px-2 py-1"
-                          value={String(v?.motor ?? "")}
-                          onChange={(e) => setOne(art, { motor: e.target.value })}
-                        >
-                          <option value="">—</option>
-                          <option value="BOSCH">Bosch</option>
-                          <option value="PANASONIC">Panasonic</option>
-                          <option value="PINION">Pinion</option>
-                          <option value="UNKNOWN">Unknown</option>
-                        </select>
-                      </td>
-                      <td className="py-2 pr-2">
-                        <input
-                          type="checkbox"
-                          checked={!!v?.isFixprice}
-                          onChange={(e) => setOne(art, { isFixprice: e.target.checked })}
-                        />
-                      </td>
-                      <td className="py-2 pr-2 text-right">
-                        <Button variant="secondary" onClick={() => remove(art)}>Löschen</Button>
-                      </td>
-                    </tr>
-                  ))}
-                  {items.length === 0 ? (
-                    <tr>
-                      <td className="py-4 text-sm text-neutral-600" colSpan={4}>Keine Treffer.</td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+                )}
+
+                {rows.map((r, idx) => (
+                  <tr key={idx} className="border-t">
+                    <td className="px-3 py-2">
+                      <input
+                        value={r.articleNo}
+                        onChange={(e) =>
+                          updateRow(idx, { articleNo: e.target.value.trim() })
+                        }
+                        placeholder="Artikelnummer"
+                        className="w-full rounded-lg border px-2 py-1"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <select
+                        value={r.motor}
+                        onChange={(e) =>
+                          updateRow(idx, {
+                            motor: e.target.value as "BOSCH" | "PANASONIC",
+                          })
+                        }
+                        className="rounded-lg border px-2 py-1"
+                      >
+                        <option value="BOSCH">Bosch</option>
+                        <option value="PANASONIC">Panasonic</option>
+                      </select>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        onClick={() => removeRow(idx)}
+                        className="text-red-600 hover:underline"
+                      >
+                        Entfernen
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </RequireRole>
   );
