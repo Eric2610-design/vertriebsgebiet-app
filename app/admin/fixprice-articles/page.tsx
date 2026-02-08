@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import RequireRole from "@/components/auth/RequireRole";
+import RequireRole from "@/components/RequireRole";
 
 type FixpriceRow = {
   articleNo: string;
@@ -68,16 +68,11 @@ export default function FixpriceArticlesPage() {
   }
 
   function addRow() {
-    setRows([
-      ...rows,
-      { articleNo: "", motor: "BOSCH" },
-    ]);
+    setRows([...rows, { articleNo: "", motor: "BOSCH" }]);
   }
 
   function updateRow(idx: number, patch: Partial<FixpriceRow>) {
-    setRows(
-      rows.map((r, i) => (i === idx ? { ...r, ...patch } : r))
-    );
+    setRows(rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
 
   function removeRow(idx: number) {
@@ -92,7 +87,7 @@ export default function FixpriceArticlesPage() {
             <h1 className="text-2xl font-semibold">Fixpreis · Artikel</h1>
             <p className="text-sm text-neutral-600">
               Artikelnummern mit Fixpreis (aus „Regeln und Schwellen.xlsx“).
-              Spalte E ≠ leer ⇒ Fixpreis.
+              Spalte E ≠ leer ⇒ Fixpreis/Sonderpreis. Spalte E leer ⇒ Normalpreis.
             </p>
           </div>
 
@@ -114,9 +109,7 @@ export default function FixpriceArticlesPage() {
         </div>
 
         {msg && (
-          <div className="rounded-xl border bg-neutral-50 p-3 text-sm">
-            {msg}
-          </div>
+          <div className="rounded-xl border bg-neutral-50 p-3 text-sm">{msg}</div>
         )}
 
         {loading ? (
