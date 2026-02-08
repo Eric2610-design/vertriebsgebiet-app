@@ -5,17 +5,31 @@ export async function GET() {
   try {
     const supabase = supabaseService();
 
-    // 1) Nur Master mit Geo (kommt aus der View)
+    // MINIMAL: nur das, was die Karte wirklich braucht.
     const { data: all, error } = await supabase
       .from("v_dealers_map")
-      .select(
-        "id,name,street,zip,city,country_iso,phone,email,website,opening_hours,lat,lng,geocode_status,created_at,updated_at,buying_group_key,sources,source_count"
-      )
+      .select("id,name,street,zip,city,country_iso,lat,lng,geocode_status")
       .order("name", { ascending: true });
 
-    if (error) return bad(error.message, 500);
+    if (error) {
+      // Supabase gibt bei fehlenden Spalten oft nur "Bad Request" zurück.
+      // Wir geben Details aus, damit du sofort siehst, WAS fehlt.
+      return bad(
+        JSON.stringify(
+          {
+            message: error.message,
+            details: (error as any).details,
+            hint: (error as any).hint,
+            code: (error as any).code,
+          },
+          null,
+          2
+        ),
+        500
+      );
+    }
 
-    // 2) Hersteller-Piktogramme separat nachladen (Views können nicht sauber embed-joinen)
+    // Hersteller nachladen
     const ids = (all ?? []).map((d: any) => d.id).filter(Boolean);
     const manuByDealer = new Map<string, string[]>();
 
@@ -25,7 +39,21 @@ export async function GET() {
         .select("dealer_id,manufacturer_key")
         .in("dealer_id", ids);
 
-      if (mErr) return bad(mErr.message, 500);
+      if (mErr) {
+        return bad(
+          JSON.stringify(
+            {
+              message: mErr.message,
+              details: (mErr as any).details,
+              hint: (mErr as any).hint,
+              code: (mErr as any).code,
+            },
+            null,
+            2
+          ),
+          500
+        );
+      }
 
       for (const r of manuRows ?? []) {
         const arr = manuByDealer.get((r as any).dealer_id) ?? [];
