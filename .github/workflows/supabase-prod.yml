@@ -10,19 +10,15 @@ jobs:
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID_PROD }}
-      DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PROD }}
+      DB_URL: ${{ secrets.SUPABASE_DB_URL_PROD }}
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: supabase/setup-cli@v1
 
-      # Apply migrations using direct DB connection (bypasses pooler auth issues)
-      - name: Apply DB migrations (direct DB url)
-        run: |
-          supabase db push --db-url "postgresql://postgres:${DB_PASSWORD}@db.${PROJECT_ID}.supabase.co:5432/postgres"
+      - name: Apply DB migrations (via session pooler)
+        run: supabase db push --db-url "$DB_URL"
 
-      # Deploy Edge Functions only if folder exists
       - name: Deploy Edge Functions (if present)
         run: |
           if [ -d "supabase/functions" ] && [ "$(ls -A supabase/functions 2>/dev/null)" ]; then
@@ -30,3 +26,4 @@ jobs:
           else
             echo "No supabase/functions directory - skipping."
           fi
+
