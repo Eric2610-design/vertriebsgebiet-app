@@ -18,18 +18,21 @@ export async function POST(req: Request) {
 
     if (error) return bad(error.message, 500);
 
-    // Load manufacturers for export (views cannot embed relationships).
-    const manuByDealer = new Map<string, string[]>();
-    const { data: manuRows, error: mErr } = await supabase
-      .from("dealer_manufacturers")
-      .select("dealer_id,manufacturer_key")
-      .in("dealer_id", ids);
-    if (mErr) return bad(mErr.message, 500);
-    for (const r of manuRows ?? []) {
-      const arr = manuByDealer.get((r as any).dealer_id) ?? [];
-      arr.push((r as any).manufacturer_key);
-      manuByDealer.set((r as any).dealer_id, arr);
-    }
+
+// Load manufacturers for export (views cannot embed relationships).
+const manuByDealer = new Map<string, string[]>();
+if (ids.length) {
+  const { data: manuRows, error: mErr } = await supabase
+    .from("dealer_manufacturers")
+    .select("dealer_id,manufacturer_key")
+    .in("dealer_id", ids);
+  if (mErr) return bad(mErr.message, 500);
+  for (const r of manuRows ?? []) {
+    const arr = manuByDealer.get((r as any).dealer_id) ?? [];
+    arr.push((r as any).manufacturer_key);
+    manuByDealer.set((r as any).dealer_id, arr);
+  }
+}
 
 
     const rows = (data ?? []).map((d: any) => {
