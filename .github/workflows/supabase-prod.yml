@@ -2,25 +2,31 @@ name: Supabase Deploy (Prod)
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PROD }}
       PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID_PROD }}
+      DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PROD }}
 
     steps:
       - uses: actions/checkout@v4
+
       - uses: supabase/setup-cli@v1
 
-      - name: Link project
-        run: supabase link --project-ref "$PROJECT_ID"
+      # Apply migrations using direct DB connection (bypasses pooler auth issues)
+      - name: Apply DB migrations (direct DB url)
+        run: |
+          supabase db push --db-url "postgresql://postgres:${DB_PASSWORD}@db.${PROJECT_ID}.supabase.co:5432/postgres"
 
-      - name: Apply DB migrations
-        run: supabase db push
-
-      - name: Deploy Edge Functions
-        run: supabase functions deploy
+      # Deploy Edge Functions only if folder exists
+      - name: Deploy Edge Functions (if present)
+        run: |
+          if [ -d "supabase/functions" ] && [ "$(ls -A supabase/functions 2>/dev/null)" ]; then
+            supabase functions deploy --project-ref "$PROJECT_ID"
+          else
+            echo "No supabase/functions directory - skipping."
+          fi
