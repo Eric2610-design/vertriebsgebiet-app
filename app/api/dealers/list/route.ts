@@ -1,89 +1,47 @@
-export const dynamic = "force-dynamic";
+import { supabaseService } from "@/lib/supabase";
+import { ok, bad } from "@/app/api/_util";
 
-import { NextResponse } from "next/server";
-import { createSupabaseServer } from "../../../lib/supabase/server";
-
-function clampInt(v: string | null, def: number, min: number, max: number) {
-  const n = Number.parseInt(v ?? "", 10);
-  if (!Number.isFinite(n)) return def;
-  return Math.max(min, Math.min(max, n));
-}
-
-function chunk<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-
-export async function GET(req: Request) {
+export async function GET() {
   try {
-    const supabase = createSupabaseServer();
-    const url = new URL(req.url);
+    const supabase = supabaseService();
 
-    const limit = clampInt(url.searchParams.get("limit"), 5000, 1, 10000);
-    const offset = clampInt(url.searchParams.get("offset"), 0, 0, 200000);
+    const step = 1000;
+    let from = 0;
+    const all: any[] = [];
 
-    const from = offset;
-    const to = offset + limit - 1;
+    while (true) {
+      let q = supabase
+        .from("dealers")
+        .select(`
+          id,name,street,zip,city,country,country_iso,phone,email,website,opening_hours,lat,lng,geocode_status,notes,created_at,updated_at,
+          buying_group_key,
+          dealer_manufacturers!left(manufacturer_key)
+        `)
+        .eq("status", "active")
+        .is("merged_into", null)
+        .order("name", { ascending: true })
+        .range(from, from + step - 1);
 
-    const { data: dealers, error: dealersError, count } = await supabase
-      .from("dealers")
-      .select(
-        "id,name,street,zip,city,country_iso,phone,email,website,opening_hours,lat,lng,geocode_status,buying_group_key,updated_at",
-        { count: "exact" }
-      )
-      .eq("status", "active")
-      .is("merged_into", null)
-      .order("name", { ascending: true })
-      .range(from, to);
+      const { data, error } = await q;
 
-    if (dealersError) {
-      return NextResponse.json(
-        { error: "Dealer query failed", supabase_error: dealersError },
-        { status: 400 }
-      );
+      if (error) return bad(error.message, 500);
+      if (!data || data.length === 0) break;
+
+      all.push(...data);
+
+      if (data.length < step) break;
+      from += step;
     }
 
-    const ids = (dealers ?? []).map((d: any) => d.id).filter(Boolean);
-
-    // Hersteller pro Dealer holen (in Chunks, damit "IN (...)" nicht zu groß wird)
-    const manufacturersByDealer = new Map<string, string[]>();
-    for (const part of chunk(ids, 900)) {
-      const { data: mans, error: mansError } = await supabase
-        .from("dealer_manufacturers")
-        .select("dealer_id,manufacturer_key,status")
-        .in("dealer_id", part)
-        .eq("status", "active");
-
-      if (mansError) {
-        return NextResponse.json(
-          { error: "Manufacturer query failed", supabase_error: mansError },
-          { status: 400 }
-        );
-      }
-
-      for (const m of mans ?? []) {
-        const did = (m as any).dealer_id as string;
-        const key = (m as any).manufacturer_key as string;
-        if (!did || !key) continue;
-        const arr = manufacturersByDealer.get(did) ?? [];
-        if (!arr.includes(key)) arr.push(key);
-        manufacturersByDealer.set(did, arr);
-      }
-    }
-
-    const items = (dealers ?? []).map((d: any) => ({
-      ...d,
-      manufacturer_keys: manufacturersByDealer.get(d.id) ?? [],
-    }));
-
-    return NextResponse.json({
-      items,
-      total: count ?? items.length,
-      limit,
-      offset,
+    const items = all.map((d: any) => {
+      const manufacturer_keys = (d.dealer_manufacturers ?? []).map((x: any) => x.manufacturer_key);
+      const has_flyer = manufacturer_keys.includes("flyer");
+      delete d.dealer_manufacturers;
+      return { ...d, has_flyer, manufacturer_keys };
     });
+
+    return ok({ items });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Server error" }, { status: 500 });
+    return bad(e?.message ?? "Failed to load dealers", 500);
   }
 }

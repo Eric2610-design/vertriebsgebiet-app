@@ -28,21 +28,46 @@ export async function GET(_: Request, ctx: { params: Promise<{ email: string }> 
     .eq("profile_email", email);
   if (terr) return bad(terr.message, 500);
 
-  // Load dealers (cap) and filter in code by territory ranges.
-  const { data: dealers, error: derr } = await supabase
-    .from("dealers")
-    .select("id,name,street,zip,city,country")
-    .order("name", { ascending: true })
-    .limit(10000);
-  if (derr) return bad(derr.message, 500);
+  // Load dealers with pagination (Supabase/PostgREST may cap single requests).
+  // We only want ACTIVE masters here.
+  const step = 1000;
+  let from = 0;
+  const all: any[] = [];
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("dealers")
+      .select(
+        `
+          id,name,street,zip,city,country_iso,zipcode_int,buying_group_key,
+          dealer_manufacturers!left(manufacturer_key)
+        `
+      )
+      .eq("status", "active")
+      .is("merged_into", null)
+      .order("name", { ascending: true })
+      .range(from, from + step - 1);
+
+    if (error) return bad(error.message, 500);
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < step) break;
+    from += step;
+  }
 
   const ranges = territories ?? [];
-  const dealerItems = (dealers ?? []).filter((d: any) => {
-    const p = plz2(d.zip);
-    if (p == null) return false;
-    const c = String(d.country ?? "DE").toUpperCase();
-    return ranges.some((r: any) => String(r.country ?? "DE").toUpperCase() === c && p >= r.plz2_from && p <= r.plz2_to);
-  });
+  const dealerItems = all
+    .map((d: any) => {
+      const manufacturer_keys = (d.dealer_manufacturers ?? []).map((x: any) => x.manufacturer_key);
+      delete d.dealer_manufacturers;
+      return { ...d, manufacturer_keys };
+    })
+    .filter((d: any) => {
+      const p = plz2(d.zip);
+      if (p == null) return false;
+      const c = String(d.country_iso ?? "DE").toUpperCase();
+      return ranges.some((r: any) => String(r.country ?? "DE").toUpperCase() === c && p >= r.plz2_from && p <= r.plz2_to);
+    });
 
   const dealerIds = dealerItems.map((d: any) => d.id);
   let visits: any[] = [];
@@ -66,7 +91,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ email: string }> 
       id: v.id,
       created_at: v.created_at,
       note: v.note,
-      dealer: d ? { id: d.id, name: d.name, zip: d.zip, city: d.city } : null,
+      dealer: d ? { id: d.id, name: d.name, zip: d.zip, city: d.city, manufacturer_keys: d.manufacturer_keys, buying_group_key: d.buying_group_key } : null,
     };
   });
 
