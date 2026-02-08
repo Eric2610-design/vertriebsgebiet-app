@@ -629,7 +629,7 @@ Hinweis: ${sameZipForce ? "FORCE aktiv (ignoriert Adresse/Land/PLZ-Checks)." : "
             </Button>
           ) : null}
           <Link href="/map"><Button variant="secondary">Zur Karte</Button></Link>
-          <Link href="/cleanup"><Button variant="secondary">Cleanup</Button></Link>
+          <Link href="/admin/cleanup"><Button variant="secondary">Cleanup</Button></Link>
           <Link href="/admin/buying-groups"><Button variant="secondary">Einkaufsverbände</Button></Link>
           <Button variant="danger" onClick={deleteDealer}>Händler löschen</Button>
         </div>

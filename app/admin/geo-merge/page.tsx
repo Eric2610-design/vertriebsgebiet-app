@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, CardContent, CardHeader, Input, Select } from "@/components/ui";
-
 import { DealerListPictos } from "@/components/DealerListPictos";
 
 type DealerRow = {

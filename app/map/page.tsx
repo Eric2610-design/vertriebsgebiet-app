@@ -884,7 +884,7 @@ export default function MapPage() {
                 {dupLoading ? "Lade…" : "Aktualisieren"}
               </Button>
               <Badge tone="slate">{dupLoading ? "…" : `${geoDupGroups.length} Gruppen`}</Badge>
-              <Link href="/cleanup" className="text-xs text-blue-700 underline">
+              <Link href="/admin/cleanup" className="text-xs text-blue-700 underline">
                 Vollständige Cleanup-Seite öffnen
               </Link>
             </div>

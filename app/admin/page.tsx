@@ -141,7 +141,7 @@ export default function AdminPage() {
             <CardContent className="p-4">
               <div className="text-sm font-semibold">Cleanup</div>
               <div className="text-xs text-slate-600 mt-1">Duplikate prüfen & zusammenführen.</div>
-              <Link href="/cleanup"><Button className="mt-3" variant="secondary">Öffnen</Button></Link>
+              <Link href="/admin/cleanup"><Button className="mt-3" variant="secondary">Öffnen</Button></Link>
             </CardContent>
           </Card>
           <Card>

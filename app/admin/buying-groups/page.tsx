@@ -225,7 +225,7 @@ export default function BuyingGroupsPage() {
         </div>
         <div className="flex gap-2">
           <Link href="/map" className="text-sm text-blue-600 hover:underline">Zur Karte</Link>
-          <Link href="/cleanup" className="text-sm text-blue-600 hover:underline">Cleanup</Link>
+          <Link href="/admin/cleanup" className="text-sm text-blue-600 hover:underline">Cleanup</Link>
           <Link href="/admin" className="text-sm text-blue-600 hover:underline">Admin</Link>
         </div>
       </div>
