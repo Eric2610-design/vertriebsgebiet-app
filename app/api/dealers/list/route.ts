@@ -9,7 +9,7 @@ export async function GET() {
     const { data: all, error } = await supabase
       .from("v_dealers_map")
       .select(
-        "id,name,street,zip,city,country_iso,phone,email,website,opening_hours,lat,lng,geocode_status,notes,created_at,updated_at,buying_group_key,sources,source_count"
+        "id,name,street,zip,city,country_iso,phone,email,website,opening_hours,lat,lng,geocode_status,created_at,updated_at,buying_group_key,sources,source_count"
       )
       .order("name", { ascending: true });
 
