@@ -12,19 +12,28 @@ export async function POST(req: Request) {
 
     const supabase = supabaseService();
     const { data, error } = await supabase
-      .from("dealers")
-      .select(
-        `
-          id,name,street,zip,city,country,phone,email,website,opening_hours,lat,lng,geocode_status,notes,buying_group_key,
-          dealer_manufacturers!left(manufacturer_key)
-        `
-      )
+      .from("v_dealers_master")
+      .select(`id,name,street,zip,city,country_iso,phone,email,website,opening_hours,lat,lng,geocode_status,notes,buying_group_key,sources,source_count`)
       .in("id", ids);
 
     if (error) return bad(error.message, 500);
 
+    // Load manufacturers for export (views cannot embed relationships).
+    const manuByDealer = new Map<string, string[]>();
+    const { data: manuRows, error: mErr } = await supabase
+      .from("dealer_manufacturers")
+      .select("dealer_id,manufacturer_key")
+      .in("dealer_id", ids);
+    if (mErr) return bad(mErr.message, 500);
+    for (const r of manuRows ?? []) {
+      const arr = manuByDealer.get((r as any).dealer_id) ?? [];
+      arr.push((r as any).manufacturer_key);
+      manuByDealer.set((r as any).dealer_id, arr);
+    }
+
+
     const rows = (data ?? []).map((d: any) => {
-      const manufacturer_keys = (d.dealer_manufacturers ?? []).map((x: any) => x.manufacturer_key).join(",");
+      const manufacturer_keys = (manuByDealer.get(d.id) ?? []).join(",");
       return {
         id: d.id,
         name: d.name,
