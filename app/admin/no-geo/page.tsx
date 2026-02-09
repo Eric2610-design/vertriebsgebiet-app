@@ -31,6 +31,8 @@ export default function AdminNoGeoPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importBusy, setImportBusy] = useState(false);
+  const [autoGeocodeBusy, setAutoGeocodeBusy] = useState(false);
+  const [autoGeocodeMsg, setAutoGeocodeMsg] = useState<string | null>(null);
 
   type Preview = {
     id: string;
@@ -200,6 +202,37 @@ export default function AdminNoGeoPage() {
     }
   };
 
+  const runAutoGeocode = async () => {
+    if (!confirm("Alle Händler ohne Geodaten automatisch geocoden?\n\nHinweis: Das kann je nach Anzahl etwas dauern.")) return;
+    let totalOk = 0;
+    let totalFailed = 0;
+    let rounds = 0;
+    try {
+      setAutoGeocodeBusy(true);
+      setAutoGeocodeMsg("Starte Geocoding…");
+      while (rounds < 200) {
+        rounds++;
+        const res = await fetch("/api/geocode/run?limit=10", { method: "POST" });
+        const js = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(js?.error || "Geocoding fehlgeschlagen");
+        const ok = Number(js.ok ?? 0);
+        const failed = Number(js.failed ?? 0);
+        const processed = Number(js.processed ?? ok + failed);
+        totalOk += ok;
+        totalFailed += failed;
+        setAutoGeocodeMsg(
+          `Batch ${rounds}: ${ok} ok, ${failed} fehlgeschlagen. Gesamt: ${totalOk} ok / ${totalFailed} fehlgeschlagen.`
+        );
+        if (processed === 0) break;
+      }
+      await load();
+    } catch (e: any) {
+      setAutoGeocodeMsg(e?.message ?? "Geocoding fehlgeschlagen");
+    } finally {
+      setAutoGeocodeBusy(false);
+    }
+  };
+
   return (
     <RequireRole allow={["admin", "superadmin"]}>
       <div className="space-y-4">
@@ -260,10 +293,14 @@ export default function AdminNoGeoPage() {
               >
                 {importBusy ? "Wende an…" : "Anwenden"}
               </Button>
+              <Button variant="secondary" className="h-9" onClick={runAutoGeocode} disabled={autoGeocodeBusy}>
+                {autoGeocodeBusy ? "Geocoding läuft…" : "Auto-Geocode (alle)"}
+              </Button>
               <Badge tone="slate">{loading ? "…" : `${rows.length} Treffer`}</Badge>
             </div>
           </CardHeader>
           <CardContent>
+            {autoGeocodeMsg ? <div className="mb-2 text-sm text-slate-700">{autoGeocodeMsg}</div> : null}
             {previewMsg ? <div className="mb-2 text-sm text-slate-700">{previewMsg}</div> : null}
             {preview.length ? (
               <div className="mb-4 overflow-auto rounded-xl border border-slate-200">

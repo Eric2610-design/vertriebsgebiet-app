@@ -7,9 +7,12 @@ async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-export async function POST() {
+export async function POST(req: Request) {
   await requireAdmin();
   const supabase = supabaseService();
+  const url = new URL(req.url);
+  const limitParam = Number(url.searchParams.get("limit"));
+  const limit = Number.isFinite(limitParam) ? Math.min(Math.max(Math.floor(limitParam), 1), 50) : 40;
 
   const { data: dealers, error } = await supabase
     .from("dealers")
@@ -17,7 +20,7 @@ export async function POST() {
     .is("lat", null)
     .is("lng", null)
     .in("geocode_status", ["missing", "failed"])
-    .limit(40);
+    .limit(limit);
 
   if (error) return bad(error.message, 500);
 
@@ -26,7 +29,11 @@ export async function POST() {
 
   for (const d of dealers ?? []) {
     const q = joinAddress(d.street, d.zip, d.city, d.country || "DE");
-    if (!q) continue;
+    if (!q) {
+      await supabase.from("dealers").update({ geocode_status: "failed" }).eq("id", d.id);
+      failed++;
+      continue;
+    }
 
     try {
       const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`;
@@ -54,5 +61,5 @@ export async function POST() {
     await sleep(1100);
   }
 
-  return ok({ ok: okCount, failed });
+  return ok({ ok: okCount, failed, processed: dealers?.length ?? 0 });
 }
