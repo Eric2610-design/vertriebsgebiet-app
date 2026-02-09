@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Badge, Button, Card, CardContent, CardHeader, Input, Select } from "@/components/ui";
+import { Badge, Button, Input, Select } from "@/components/ui";
 
 type Market = "DE_AT" | "CH";
 
@@ -83,88 +83,116 @@ export default function OrdertoolPage() {
   }, [market, q]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Ordertool</h1>
-          <div className="mt-1 text-sm text-slate-600">
-            Lagerbestand aus dem aktuellen Snapshot. Suche und filtere nach Artikelnummer oder Modell.
+    <div className="-mx-4 -mt-6 bg-gradient-to-b from-[#060a14] to-[#0b1220] pb-10 text-slate-100">
+      <div className="mx-auto max-w-[1100px] px-4 pt-8">
+        <div className="rounded-[18px] border border-slate-700/40 bg-slate-900/80 p-5 shadow-[0_18px_55px_rgba(0,0,0,0.35)]">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h1 className="text-lg font-semibold">FLYER Ordertool</h1>
+              <div className="mt-1 text-sm text-slate-300">
+                Lagerbestand aus dem aktuellen Snapshot. Suche und filtere nach Artikelnummer oder Modell.
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <MarketBadge market={market} />
+              <Select
+                value={market}
+                onChange={(e) => setMarket(e.target.value as Market)}
+                className="h-10 w-36 rounded-xl border border-slate-700/60 bg-[#0b1220] text-sm font-semibold text-slate-100"
+              >
+                <option value="DE_AT">🇩🇪 DE / AT</option>
+                <option value="CH">🇨🇭 CH</option>
+              </Select>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <MarketBadge market={market} />
-          <Select value={market} onChange={(e) => setMarket(e.target.value as Market)} className="w-32">
-            <option value="DE_AT">DE / AT</option>
-            <option value="CH">CH</option>
-          </Select>
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_1.9fr]">
+            <section className="rounded-2xl border border-slate-700/40 bg-slate-900/40 p-4">
+              <h2 className="text-sm font-semibold">Suche &amp; Filter</h2>
+              <p className="mt-1 text-xs text-slate-400">
+                Filtere nach Artikelnummer, Modell, Serie oder Farbe. Markt bestimmt die sichtbaren Preise.
+              </p>
+
+              <div className="mt-3 flex flex-col gap-2">
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Suche nach Artikelnummer, Modell, Serie…"
+                  className="h-10 rounded-xl border border-slate-700/70 bg-[#0b1220] text-sm font-semibold text-slate-100 placeholder:text-slate-500"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => setQuery("")}
+                    disabled={!query}
+                    className="h-10 rounded-xl border border-slate-700/70 bg-white/5 text-slate-100 hover:bg-white/10"
+                  >
+                    Zurücksetzen
+                  </Button>
+                  <div className="text-xs text-slate-500">Es wird immer der neueste Import genutzt.</div>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-slate-700/40 bg-slate-900/40 p-3 text-xs text-slate-300">
+                <div className="font-semibold text-slate-200">Status</div>
+                {err ? <div className="mt-1 text-red-300">{err}</div> : null}
+                {loading ? <div className="mt-1 text-slate-400">Lade Lagerbestand…</div> : null}
+                {!loading && !items.length ? <div className="mt-1 text-slate-400">Keine Artikel gefunden.</div> : null}
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-700/40 bg-slate-900/40 p-4">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold">Artikel &amp; Verfügbarkeit</div>
+                <div className="text-xs text-slate-400">Max = Verfügbar gesamt</div>
+              </div>
+
+              <div className="mt-3 overflow-auto">
+                <table className="min-w-full border-separate border-spacing-y-2 text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-slate-400">
+                      <th className="px-3 py-1">Artikel</th>
+                      <th className="px-3 py-1">Modell</th>
+                      <th className="px-3 py-1">Verfügbarkeit</th>
+                      <th className="px-3 py-1 text-right">Max.</th>
+                      <th className="px-3 py-1 text-right">Preis</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((item) => (
+                      <tr key={item.id} className="rounded-xl bg-[#0b1220]">
+                        <td className="px-3 py-2 align-top">
+                          <div className="font-semibold text-slate-100">{item.name || "–"}</div>
+                          <div className="text-xs text-slate-500">#{item.sku}</div>
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div className="text-slate-100">{item.model || item.series || "–"}</div>
+                          <div className="text-xs text-slate-500">
+                            {[item.color, item.frame_size].filter(Boolean).join(" · ") || "–"}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <Badge tone={(item.avail_now ?? 0) > 0 ? "emerald" : "slate"}>
+                            {getAvailabilityLabel(item)}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2 text-right align-top text-slate-100">
+                          {item.avail_total ?? "–"}
+                        </td>
+                        <td className="px-3 py-2 text-right align-top text-slate-100">
+                          {market === "CH"
+                            ? formatPrice(item.price_chf, "CHF")
+                            : formatPrice(item.price_eur, "EUR")}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
-
-      <Card>
-        <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="text-sm font-semibold">Artikel &amp; Verfügbarkeit</div>
-          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Suche nach Artikelnummer, Modell, Serie…"
-              className="md:w-80"
-            />
-            <Button variant="secondary" onClick={() => setQuery("")} disabled={!query}>
-              Zurücksetzen
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {err ? <div className="text-sm text-red-700">{err}</div> : null}
-          {loading ? <div className="text-sm text-slate-500">Lade Lagerbestand…</div> : null}
-
-          {!loading && !items.length ? (
-            <div className="text-sm text-slate-500">Keine Artikel gefunden.</div>
-          ) : (
-            <div className="overflow-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs text-slate-500">
-                    <th className="px-2 py-2">Artikel</th>
-                    <th className="px-2 py-2">Modell</th>
-                    <th className="px-2 py-2">Verfügbarkeit</th>
-                    <th className="px-2 py-2">Max.</th>
-                    <th className="px-2 py-2">Preis</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item) => (
-                    <tr key={item.id} className="border-t border-slate-100">
-                      <td className="px-2 py-2">
-                        <div className="font-medium">{item.name || "–"}</div>
-                        <div className="text-xs text-slate-500">#{item.sku}</div>
-                      </td>
-                      <td className="px-2 py-2">
-                        <div>{item.model || item.series || "–"}</div>
-                        <div className="text-xs text-slate-500">
-                          {[item.color, item.frame_size].filter(Boolean).join(" · ") || "–"}
-                        </div>
-                      </td>
-                      <td className="px-2 py-2">
-                        <Badge tone={(item.avail_now ?? 0) > 0 ? "emerald" : "slate"}>
-                          {getAvailabilityLabel(item)}
-                        </Badge>
-                      </td>
-                      <td className="px-2 py-2">{item.avail_total ?? "–"}</td>
-                      <td className="px-2 py-2">
-                        {market === "CH"
-                          ? formatPrice(item.price_chf, "CHF")
-                          : formatPrice(item.price_eur, "EUR")}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }
