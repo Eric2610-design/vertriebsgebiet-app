@@ -139,13 +139,6 @@ export default function AdminPage() {
           </Card>
           <Card>
             <CardContent className="p-4">
-              <div className="text-sm font-semibold">Lagerbestand</div>
-              <div className="text-xs text-slate-600 mt-1">Tägliche Bestands-Snapshots für das Ordertool.</div>
-              <Link href="/admin/stock-import"><Button className="mt-3" variant="secondary">Öffnen</Button></Link>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
               <div className="text-sm font-semibold">Cleanup</div>
               <div className="text-xs text-slate-600 mt-1">Duplikate prüfen & zusammenführen.</div>
               <Link href="/admin/cleanup"><Button className="mt-3" variant="secondary">Öffnen</Button></Link>
