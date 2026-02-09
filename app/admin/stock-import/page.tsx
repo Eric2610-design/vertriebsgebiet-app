@@ -20,7 +20,44 @@ type StockItem = {
   motor_brand: string | null;
   avail_now: number | null;
   avail_total: number | null;
+  raw?: Record<string, any> | null;
 };
+
+function toNum(v: unknown): number {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  if (v == null) return 0;
+  const s = String(v).trim().replace(/\s+/g, "").replace(",", ".");
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function pos(v: unknown): number {
+  return Math.max(toNum(v), 0);
+}
+
+function getProdVorschlag(item: StockItem): number {
+  const raw = item.raw ?? null;
+  if (!raw || typeof raw !== "object") {
+    // Fallback for older snapshots that did not include raw
+    const now = pos(item.avail_now);
+    const total = pos(item.avail_total);
+    return Math.max(total - now, 0);
+  }
+
+  // Exact key from the Excel import
+  if (raw["Menge Produktions-vorschlag"] !== undefined) {
+    return pos(raw["Menge Produktions-vorschlag"]);
+  }
+
+  // Fuzzy fallback (in case of minor header variations)
+  const key = Object.keys(raw).find((k) => k.toLowerCase().includes("menge produktions-vorschlag"));
+  if (key) return pos((raw as any)[key]);
+
+  // Last resort: old behavior
+  const now = pos(item.avail_now);
+  const total = pos(item.avail_total);
+  return Math.max(total - now, 0);
+}
 
 type StockSummaryFilter = {
   motor_brand: string;
@@ -100,10 +137,11 @@ export default function StockImportPage() {
     const sum = (items: StockItem[]) =>
       items.reduce(
         (acc, item) => {
-          const now = Number(item.avail_now ?? 0) || 0;
-          const total = Number(item.avail_total ?? 0) || 0;
-          const build = Math.max(total - now, 0);
-          acc.lagernd += now;
+          // Lagernd = Summe der POSITIVEN Werte aus Spalte X (Freier verfügbarer Bestand)
+          const nowPos = pos(item.avail_now);
+          // Zu bauen = Summe Spalte AA (Menge Produktions-vorschlag)
+          const build = getProdVorschlag(item);
+          acc.lagernd += nowPos;
           acc.zuBauen += build;
           return acc;
         },
@@ -120,11 +158,10 @@ export default function StockImportPage() {
     const map = new Map<string, { lagernd: number; zuBauen: number; skus: number }>();
     for (const item of filteredSummaryItems) {
       const key = String(item[summaryGroupBy as keyof StockItem] ?? "").trim() || "(leer)";
-      const now = Number(item.avail_now ?? 0) || 0;
-      const total = Number(item.avail_total ?? 0) || 0;
-      const build = Math.max(total - now, 0);
+      const nowPos = pos(item.avail_now);
+      const build = getProdVorschlag(item);
       const entry = map.get(key) ?? { lagernd: 0, zuBauen: 0, skus: 0 };
-      entry.lagernd += now;
+      entry.lagernd += nowPos;
       entry.zuBauen += build;
       entry.skus += 1;
       map.set(key, entry);
@@ -136,7 +173,7 @@ export default function StockImportPage() {
 
   const summaryMeta = useMemo(() => {
     const total = summaryItems.length;
-    const relevant = summaryItems.filter((item) => (Number(item.avail_now ?? 0) || 0) > 0).length;
+    const relevant = summaryItems.filter((item) => pos(item.avail_now) > 0).length;
     return { total, relevant };
   }, [summaryItems]);
 
