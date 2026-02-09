@@ -27,7 +27,7 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const market = normMarket(searchParams.get("market"));
   const q = normQuery(searchParams.get("q"));
-  const limit = Math.min(parseInt(searchParams.get("limit") || "200", 10) || 200, 1000);
+  const limit = Math.min(parseInt(searchParams.get("limit") || "200", 10) || 200, 5000);
 
   const supabase = supabaseService();
   const runRes = await supabase.from("stock_runs").select("id").order("created_at", { ascending: false }).limit(1).single();

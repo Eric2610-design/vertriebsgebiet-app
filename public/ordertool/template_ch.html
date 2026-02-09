@@ -11,10 +11,10 @@
   }
   *{box-sizing:border-box}
   body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);padding-bottom:90px}
-  .wrap{max-width:1280px;margin:0 auto;padding:18px 18px 60px}
+  .wrap{max-width:none;margin:0;padding:18px 18px 60px;width:100%}
   h1{margin:0 0 4px;font-size:20px}
   .sub{margin:0 0 14px;color:var(--muted);font-size:12px}
-  .topbar{display:grid;grid-template-columns:320px minmax(520px,1fr) 320px;gap:10px;align-items:stretch;position:sticky;top:0;padding:10px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.95);backdrop-filter:blur(6px);z-index:10}
+  .topbar{display:grid;grid-template-columns:minmax(520px,1fr) 320px;gap:10px;align-items:stretch;position:sticky;top:0;padding:10px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.95);backdrop-filter:blur(6px);z-index:10}
   input[type="search"], select, input[type="text"]{height:36px;border:1px solid var(--line);border-radius:10px;padding:0 10px;font-size:13px;background:#fff;min-width:170px}
   select{min-width:150px}
   .btn{height:36px;border:none;border-radius:10px;padding:0 14px;background:var(--brand);color:white;font-weight:600;cursor:pointer}
@@ -26,6 +26,9 @@
   .grid{display:grid;grid-template-columns:1fr;gap:14px;margin-top:14px}
   @media (min-width: 900px){ .grid{grid-template-columns:repeat(2,1fr)} }
   @media (min-width: 1220px){ .grid{grid-template-columns:repeat(3,1fr)} }
+  @supports (-webkit-touch-callout: none){
+    @media (min-width: 1220px){ .grid{grid-template-columns:repeat(2,1fr)} }
+  }
   .familyHeader{margin:18px 0 8px;font-weight:700;color:#111827}
   .card{border:1px solid var(--line);border-radius:14px;padding:12px;background:#fff;box-shadow:0 1px 0 rgba(15,23,42,.03)}
   .brand{font-size:10px;letter-spacing:.08em;color:var(--muted);text-transform:uppercase}
@@ -145,8 +148,7 @@
 
   /* --- top panels alignment --- */
   :root{ --topPanelH: 280px; }
-  .dealerPanel,.filterPanel,.cartPanel{height:var(--topPanelH);}
-  .dealerPanel{display:flex;flex-direction:column;overflow:hidden;}
+  .filterPanel,.cartPanel{height:var(--topPanelH);}
   .filterPanel{display:flex;flex-direction:column;overflow:hidden;}
   .cartPanel{display:flex;flex-direction:column;overflow:hidden;}
   .filterHead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px}
@@ -159,15 +161,14 @@
 
   @media (max-width: 1180px){
     .topbar{grid-template-columns: 1fr 320px;}
-    .dealerPanel{grid-column:1;grid-row:1;}
-    .filterPanel{grid-column:1;grid-row:2;}
-    .cartPanel{grid-column:2;grid-row:1 / span 2;}
+    .filterPanel{grid-column:1;grid-row:1;}
+    .cartPanel{grid-column:2;grid-row:1;}
   }
   @media (max-width: 900px){
     :root{ --topPanelH: auto; }
     .topbar{grid-template-columns:1fr;}
     .cartPanel{grid-row:auto;}
-    .dealerPanel,.filterPanel,.cartPanel{height:auto;}
+    .filterPanel,.cartPanel{height:auto;}
     .filterGrid{overflow:visible;}
   }
 
@@ -175,12 +176,12 @@
 :root{--topPanelH:280px;}
 .topbar{
   display:grid !important;
-  grid-template-columns: 300px minmax(520px, 1fr) 320px;
+  grid-template-columns: minmax(520px, 1fr) 320px;
   gap:14px;
   align-items:stretch;
   padding:14px 16px;
 }
-.dealerPanel,.filterPanel,.cartPanel{
+.filterPanel,.cartPanel{
   height:var(--topPanelH);
   overflow:hidden;
 }
@@ -201,33 +202,10 @@
 /* Responsive: on smaller widths stack panels, but keep tidy */
 @media (max-width: 980px){
   .topbar{grid-template-columns: 1fr; }
-  .dealerPanel,.filterPanel,.cartPanel{height:auto;}
+  .filterPanel,.cartPanel{height:auto;}
   .filterGrid{overflow:visible;}
   .cartMetrics{overflow:visible;}
 }
-
-
-  .actionFooter{
-    position:fixed;
-    left:50%;
-    transform:translateX(-50%);
-    bottom:14px;
-    width:min(1120px, calc(100% - 20px));
-    display:flex;
-    gap:10px;
-    padding:10px;
-    border-radius:18px;
-    border:1px solid var(--line);
-    background:rgba(255,255,255,.92);
-    backdrop-filter:blur(10px);
-    box-shadow:0 14px 35px rgba(15,23,42,.16);
-    z-index:1000;
-  }
-  .actionFooter .btn{height:42px; flex:1 1 0; display:flex; align-items:center; justify-content:center;}
-  @media (max-width:520px){
-    .actionFooter{flex-direction:column;}
-    .actionFooter .btn{width:100%;}
-  }
 
 
   /* V5: Warenkorb-Inhalt stabil sichtbar */
@@ -235,10 +213,24 @@
   .cartMetrics{min-height:104px;}
 
 
-.headRow{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+.headRow{display:grid;grid-template-columns:minmax(160px,1fr) minmax(260px,1.2fr) auto;align-items:center;gap:12px;margin-bottom:6px}
+.headInputs{display:flex;flex-direction:column;gap:6px}
+.headInputs .dealerHead{margin:0}
+.headInputs .dealerTitle{font-size:12px;font-weight:800}
+.headInputs .dealerHint{font-size:11px;color:var(--muted)}
+.headInputs .dealerGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.headInputs .dealerGrid input{width:100%;height:34px;border:1px solid var(--line);border-radius:10px;padding:0 10px;outline:none;background:#fff}
+.headInputs .dealerGrid input:focus{outline:2px solid rgba(14,165,183,.2)}
+.headInputs .dealerMeta{display:flex;align-items:baseline;gap:8px}
 .langPanel{display:flex;align-items:center;justify-content:flex-end}
 .langPanel select{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);color:var(--text);padding:10px 12px;border-radius:12px;outline:none}
-@media(max-width:760px){.headRow{flex-direction:column;align-items:flex-start}.langPanel{width:100%}.langPanel select{width:100%}}
+@media(max-width:760px){
+  .headRow{grid-template-columns:1fr;align-items:flex-start}
+  .langPanel{width:100%}
+  .langPanel select{width:100%}
+  .headInputs{width:100%}
+  .headInputs .dealerGrid{grid-template-columns:1fr}
+}
 .marketPanel{display:flex;gap:6px;align-items:center;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);border-radius:999px;padding:4px 6px}
 .mflag{width:28px;height:20px;border-radius:6px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);cursor:pointer;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center}
   .mflag svg{width:100%;height:100%;border-radius:5px;display:block}
@@ -259,7 +251,7 @@
   .marketPanel{display:none !important;}
 
 /* v32 noKalkBoschPanasonic */
-.cartKalk{display:none !important}
+.cartKalk{display:flex;flex-direction:column;gap:6px}
 
 /* v37: Schwellen im Händler-Kasten (klein & dezent) */
 .thresholdsPanel{margin-top:10px;border:1px solid var(--line);border-radius:14px;padding:10px;background:rgba(255,255,255,.88)}
@@ -288,11 +280,17 @@
 <div class="wrap">
   <div class="headRow">
     <h1 id="lblTitle">FLYER Ordertool</h1>
-        <div class="marketPanel" title="Land / Pays">
-      <button class="mflag" id="btnMarketDE" aria-label="Deutschland"><svg viewBox="0 0 3 2" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect width="3" height="2" fill="#FFCE00"/><rect width="3" height="1.3333333" y="0" fill="#DD0000"/><rect width="3" height="0.6666667" y="0" fill="#000000"/></svg></button>
-      <button class="mflag" id="btnMarketCH" aria-label="Schweiz"><svg viewBox="0 0 28 20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect width="28" height="20" fill="#D52B1E"/><rect x="11" y="4" width="6" height="12" fill="#FFFFFF"/><rect x="8" y="7" width="12" height="6" fill="#FFFFFF"/></svg></button>
+    <div class="headInputs">
+      <div class="dealerMeta">
+        <div class="dealerTitle" id="lblDealerTitle">Händler / Kunde</div>
+        <div class="dealerHint" id="lblOptional">optional</div>
+      </div>
+      <div class="dealerGrid">
+        <input id="dealerName" type="text" placeholder="Händlername"/>
+        <input id="customerNo" type="text" placeholder="Kundennummer"/>
+      </div>
     </div>
-<div class="langPanel" title="Sprache / Langue">
+    <div class="langPanel" title="Sprache / Langue">
       <select id="langToggle" aria-label="Sprache">
         <option value="de">Deutsch</option>
         <option value="fr">Français</option>
@@ -300,22 +298,6 @@
     </div>
   </div>
 <div class="topbar">
-<div class="dealerPanel">
-        <div class="dealerHead">
-          <div class="dealerTitle" id="lblDealerTitle">Händler / Kunde</div>
-          <div class="dealerHint" id="lblOptional">optional</div>
-        </div>
-        <div class="dealerGrid">
-          <input id="dealerName" type="text" placeholder="Händlername"/>
-          <input id="customerNo" type="text" placeholder="Kundennummer"/>
-        </div>
-
-        <div class="thresholdsPanel" id="thresholdsPanel">
-          <div class="thresholdsTitle">Schwellen &amp; Kalkulation</div>
-          <div class="thresholdsRule">Es gilt immer die höchste Mindestmenge ≤ bestellte Menge.</div>
-          <div id="schwOverview" class="schwOverview">—</div>
-        </div>
-      </div>
 <div class="filterPanel">
       <div class="filterHead">
         <div class="filterTitle" id="lblFilterTitle">Filter</div>
@@ -341,14 +323,22 @@
       </div>
       <div class="cartMetrics">
         <div class="mrow"><span id="lblCartTotal">Gesamt</span><strong id="cartCount">0</strong></div>
-        <div class="mrow"><span>Bosch Fixpreis</span><strong id="cartBoschFix">0</strong></div>
-        <div class="mrow"><span>Panasonic Fixpreis</span><strong id="cartPanaFix">0</strong></div>
+        <div class="mrow"><span id="lblCartBoschFix">Bosch Fixpreis</span><strong id="cartBoschFix">0</strong></div>
+        <div class="mrow"><span id="lblCartPanaFix">Panasonic Fixpreis</span><strong id="cartPanaFix">0</strong></div>
         <div class="mrow"><span id="lblCartValue">Wert (EK)</span><strong id="cartValue">0</strong></div>
       </div>
       <div class="cartDivider"></div>
-      <div class="cartActions"><button class="btn secondary cartOpenBtn" id="btnOpenCart">Warenkorb anzeigen</button></div>
       <div class="cartKalk">
-</div></div>
+        <div class="krow"><span id="lblCartBoschKalk">Kalk Bosch</span><strong id="cartBoschKalk">—</strong></div>
+        <div class="krow"><span id="lblCartPanaKalk">Kalk Panasonic</span><strong id="cartPanaKalk">—</strong></div>
+      </div>
+      <div class="cartActions">
+        <button class="btn secondary cartOpenBtn" id="btnOpenCart">Warenkorb anzeigen</button>
+        <button class="btn secondary" id="saveBtn" title="Speichert deine Eingaben lokal auf diesem Gerät">Speichern</button>
+        <button class="btn danger" id="clearBtn" title="Setzt alle Mengen zurück">Alles löschen</button>
+        <button class="btn" id="exportBtn" title="Erstellt eine CAB-Datei zur Bestellung">Bestellung abschicken</button>
+      </div>
+</div>
 </div>
 
   <div id="content">
@@ -2007,14 +1997,6 @@ document.addEventListener('DOMContentLoaded', init);
 })();
 </script>
 <!-- FLYER_AUTOSAVE_PATCH_V1_END -->
-
-
-  <!-- Action Footer -->
-  <div class="actionFooter" id="actionFooter" aria-label="Aktionen">
-    <button class="btn secondary" id="saveBtn" title="Speichert deine Eingaben lokal auf diesem Gerät">Speichern</button>
-    <button class="btn danger" id="clearBtn" title="Setzt alle Mengen zurück">Alles löschen</button>
-    <button class="btn" id="exportBtn" title="Erstellt eine CAB-Datei zur Bestellung">Bestellung abschicken</button>
-  </div>
 
 
 <!-- CART_PERSIST_V2_START -->
