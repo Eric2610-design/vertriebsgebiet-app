@@ -7,7 +7,6 @@ import { Pictogram } from "@/components/Pictogram";
 import RequireRole from "@/components/RequireRole";
 
 type SettingRow = { key: string; value: any; updated_at?: string };
-
 export default function AdminPage() {
   const [months, setMonths] = useState<string>("18");
   const [loading, setLoading] = useState<boolean>(true);
@@ -17,7 +16,6 @@ export default function AdminPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [manus, setManus] = useState<any[]>([]);
   const [groups, setGroups] = useState<any[]>([]);
-
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -46,10 +44,13 @@ export default function AdminPage() {
           setManus(mJ?.items ?? []);
           setGroups(gJ?.items ?? []);
         }
+
       } catch {
         // ignore
       } finally {
-        if (alive) setLoading(false);
+        if (alive) {
+          setLoading(false);
+        }
       }
     })();
     return () => {

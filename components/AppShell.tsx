@@ -29,6 +29,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const { me, loading } = useUser();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [cartSummary, setCartSummary] = useState({ items: 0, qty: 0 });
 
   // We only want the "Topbar" UX on iOS. On other platforms, navigation lives in the sidebar.
   // This prevents the mobile/topbar UI from showing up on laptop Chrome when the window is narrow.
@@ -36,6 +37,42 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const ua = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
     setIsIOS(/iPad|iPhone|iPod/i.test(ua));
   }, []);
+
+  useEffect(() => {
+    if (!pathname?.startsWith("/ordertool")) return;
+    const readCart = () => {
+      if (typeof window === "undefined") return;
+      const keys = ["FLYER_ORDER_AUTOSAVE_V1_DE", "FLYER_ORDER_AUTOSAVE_V1_CH"];
+      let items = 0;
+      let qty = 0;
+      for (const key of keys) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (!raw) continue;
+          const parsed = JSON.parse(raw);
+          const cart = parsed?.cart || {};
+          for (const entry of Object.values(cart)) {
+            const q = Number((entry as any)?.q ?? entry);
+            if (Number.isFinite(q) && q > 0) {
+              items += 1;
+              qty += q;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+      setCartSummary({ items, qty });
+    };
+    readCart();
+    const onStorage = () => readCart();
+    window.addEventListener("storage", onStorage);
+    const interval = window.setInterval(readCart, 2000);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.clearInterval(interval);
+    };
+  }, [pathname]);
 
   const visibleItems = useMemo(() => {
     const role = me?.role ?? null;
@@ -69,22 +106,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const userLabel = loading ? "…" : me?.email || "";
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-slate-50">
       {/* Sidebar (Desktop) */}
       <aside className="hidden md:fixed md:inset-y-0 md:flex md:w-64 md:flex-col md:border-r md:border-black md:bg-black">
         <div className="flex items-center gap-3 px-4 py-4">
-          <div className="h-10 w-10 rounded-2xl bg-white/10 flex items-center justify-center overflow-hidden">
-            <img src="/brands/flyer.png" alt="FLYER" className="h-8 w-8 object-contain" />
-          </div>
-          <div className="leading-tight">
-            <div className="text-sm font-semibold text-white">Dealer Tool</div>
-            <div className="text-xs text-slate-300">Händlerkarte</div>
+          <div className="flex h-12 w-12 items-center justify-center overflow-hidden">
+            <img src="/brands/flyer.png" alt="FLYER" className="h-12 w-12 object-contain" />
           </div>
         </div>
 
         <div className="px-3 pb-2">
           <button
-            className="w-full flex items-center justify-center rounded-xl px-3 py-2 text-sm font-medium text-slate-200 hover:bg-white/10 hover:text-white transition"
+            className="w-full flex items-center justify-start rounded-xl px-3 py-2 text-sm font-medium text-slate-200 hover:bg-white/10 hover:text-white transition"
             onClick={() => router.back()}
             type="button"
             aria-label="Zurück"
@@ -134,7 +167,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {isIOS && (
         <header className="sticky top-0 z-40 flex items-center justify-between gap-2 border-b border-black bg-black px-4 py-3 md:hidden">
           <button
-            className="inline-flex h-10 px-3 items-center justify-center rounded-xl bg-white/10 text-white"
+            className="inline-flex h-10 px-3 items-center justify-start rounded-xl bg-white/10 text-white"
             onClick={() => router.back()}
             type="button"
             aria-label="Zurück"
@@ -142,8 +175,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             ←
           </button>
           <div className="flex items-center gap-2">
-            <img src="/brands/flyer.png" alt="FLYER" className="h-6 w-6 object-contain" />
-            <div className="text-sm font-semibold text-white">Dealer Tool</div>
+            <img src="/brands/flyer.png" alt="FLYER" className="h-8 w-8 object-contain" />
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -199,7 +231,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </div>
             <div className="px-3 pb-2">
               <button
-                className="w-full flex items-center justify-center rounded-xl px-3 py-2 text-sm font-medium bg-white/10 text-white"
+                className="w-full flex items-center justify-start rounded-xl px-3 py-2 text-sm font-medium bg-white/10 text-white"
                 onClick={() => {
                   setMobileOpen(false);
                   router.back();
@@ -258,7 +290,24 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Main */}
       <div className="md:pl-64">
-        <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
+        <div className="sticky top-0 z-30 border-b border-black bg-black px-4 py-3 text-white">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-semibold">FLYER Vertriebs-App</div>
+            {pathname?.startsWith("/ordertool") ? (
+              <div className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs">
+                Warenkorb: {cartSummary.items} Artikel · {cartSummary.qty} Stück
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <main className="w-full max-w-none px-4 py-6">{children}</main>
+        <footer className="border-t border-slate-200 bg-white px-4 py-6 text-xs text-slate-500">
+          <div className="mx-auto max-w-7xl space-y-2">
+            <div className="font-semibold text-slate-700">Datenschutz &amp; Cookies (Platzhalter)</div>
+            <div>Datenschutzhinweis und Cookie-Informationen werden hier ergänzt.</div>
+            <div>Impressum-Link und weitere rechtliche Hinweise folgen.</div>
+          </div>
+        </footer>
       </div>
     </div>
   );

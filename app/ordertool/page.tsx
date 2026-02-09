@@ -1,110 +1,230 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Badge, Button, Card, CardContent, CardHeader, Select } from "@/components/ui";
+import { useMemo, useState, useEffect, useRef } from "react";
+import { Badge, Button, Card, CardContent, CardHeader, Input, Select } from "@/components/ui";
+import type { Dealer, Territory } from "@/lib/types";
 
-function MarketBadge({ market }: { market: "DE_AT" | "CH" }) {
+type Market = "DE_AT" | "CH";
+
+function MarketBadge({ market }: { market: Market }) {
   if (market === "CH") return <Badge tone="blue">CH</Badge>;
   return <Badge tone="emerald">DE/AT</Badge>;
 }
 
+type DealerListItem = Dealer & {
+  customer_no?: string | null;
+};
+
+const TEMPLATE_LINKS = {
+  DE_AT: "/ordertool/template_de_at.html",
+  CH: "/ordertool/template_ch.html",
+} as const;
+
+const plz2 = (zip?: string | null) => {
+  if (!zip) return null;
+  const m = String(zip).match(/(\d{2})/);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) ? n : null;
+};
+
 export default function OrdertoolPage() {
   const [market, setMarket] = useState<"DE_AT" | "CH">("DE_AT");
-  const [showHelp, setShowHelp] = useState(true);
+  const [dealers, setDealers] = useState<DealerListItem[]>([]);
+  const [dealerQuery, setDealerQuery] = useState("");
+  const [selectedDealerId, setSelectedDealerId] = useState("");
+  const [customerNo, setCustomerNo] = useState("");
+  const [dealerLoading, setDealerLoading] = useState(false);
+  const [dealerError, setDealerError] = useState<string | null>(null);
+  const [dealerRestricted, setDealerRestricted] = useState(false);
+  const [iframeSrc, setIframeSrc] = useState<string>("");
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
-  const generatorSrc = useMemo(() => "/ordertool/generator.html", []);
+  useEffect(() => {
+    let cancelled = false;
+    const loadDealers = async () => {
+      try {
+        setDealerLoading(true);
+        setDealerError(null);
+        const [authRes, repsRes, dealerRes] = await Promise.all([
+          fetch("/api/auth/me", { cache: "no-store" }),
+          fetch("/api/reps/list", { cache: "no-store" }),
+          fetch("/api/dealers/list", { cache: "no-store" }),
+        ]);
+        const auth = await authRes.json();
+        const reps = await repsRes.json();
+        const dealerData = await dealerRes.json();
+        if (cancelled) return;
 
-  const links = useMemo(() => {
-    return {
-      dummyStock: "/ordertool/dummy_stock.xlsx",
-      templateDE: "/ordertool/template_de_at.html",
-      templateCH: "/ordertool/template_ch.html",
+        const role = String(auth?.role || "").toLowerCase();
+        const isAdmin = role === "admin" || role === "superadmin" || auth?.is_admin;
+        const email = String(auth?.email || "").trim().toLowerCase();
+        const territories = (reps?.territories ?? []) as Territory[];
+        const items = (dealerData?.items ?? []) as DealerListItem[];
+
+        if (!isAdmin && email) {
+          const userTerritories = territories.filter((t) => String(t.profile_email || "").toLowerCase() === email);
+          if (userTerritories.length > 0) {
+            const filtered = items.filter((dealer) => {
+              const zipGroup = plz2(dealer.zip);
+              if (zipGroup == null) return false;
+              return userTerritories.some((t) => {
+                if (t.country && dealer.country && t.country !== dealer.country) return false;
+                return zipGroup >= t.plz2_from && zipGroup <= t.plz2_to;
+              });
+            });
+            setDealers(filtered);
+            setDealerRestricted(true);
+          } else {
+            setDealers([]);
+            setDealerRestricted(true);
+          }
+        } else {
+          setDealers(items);
+          setDealerRestricted(false);
+        }
+      } catch (e: any) {
+        if (!cancelled) setDealerError(e?.message ?? "Händler konnten nicht geladen werden.");
+      } finally {
+        if (!cancelled) setDealerLoading(false);
+      }
+    };
+    loadDealers();
+    return () => {
+      cancelled = true;
     };
   }, []);
 
+  const filteredDealers = useMemo(() => {
+    const query = dealerQuery.trim().toLowerCase();
+    if (!query) return dealers;
+    return dealers.filter((dealer) => dealer.name?.toLowerCase().includes(query));
+  }, [dealers, dealerQuery]);
+
+  const selectedDealer = useMemo(() => {
+    return dealers.find((dealer) => dealer.id === selectedDealerId) ?? null;
+  }, [dealers, selectedDealerId]);
+
+  const handleStartOrder = () => {
+    if (!selectedDealer) return;
+    try {
+      const payload = {
+        dealerId: selectedDealer.id,
+        dealerName: selectedDealer.name,
+        customerNo: customerNo.trim(),
+      };
+      localStorage.setItem("FLYER_ORDERTOOL_PREFILL_V1", JSON.stringify(payload));
+      localStorage.setItem("flyer_market", market === "CH" ? "CH" : "DE");
+      const target = market === "CH" ? TEMPLATE_LINKS.CH : TEMPLATE_LINKS.DE_AT;
+      setIframeSrc(target);
+      setTimeout(() => {
+        iframeRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
+    } catch {
+      alert("Ordertool konnte nicht geöffnet werden.");
+    }
+  };
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Ordertool</h1>
-          <div className="mt-1 text-sm text-slate-600">
-            MVP: Generator innerhalb der App (nur Sidebar-Einstieg). Händler-Erkennung und Export folgen später.
+    <div className="mx-auto max-w-5xl space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-xl font-semibold">Ordertool</h1>
+          <div className="text-sm text-slate-600">
+            Lagerbestand aus dem aktuellen Snapshot. Suche und filtere nach Artikelnummer oder Modell.
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <MarketBadge market={market} />
-          <Select value={market} onChange={(e) => setMarket(e.target.value as any)} className="w-32">
-            <option value="DE_AT">DE / AT</option>
-            <option value="CH">CH</option>
+          <Select
+            value={market}
+            onChange={(e) => setMarket(e.target.value as Market)}
+            className="h-10 w-36 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-900"
+          >
+            <option value="DE_AT">🇩🇪 DE / AT</option>
+            <option value="CH">🇨🇭 CH</option>
           </Select>
-          <Button variant="secondary" onClick={() => setShowHelp((v) => !v)}>
-            {showHelp ? "Hilfe ausblenden" : "Hilfe anzeigen"}
-          </Button>
+        </div>
+        <div className="w-full flex flex-wrap gap-2 md:w-auto md:min-w-[420px]">
+          <select
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 md:w-[260px]"
+            value={selectedDealerId}
+            onChange={(e) => setSelectedDealerId(e.target.value)}
+          >
+            <option value="">{dealerLoading ? "Lade Händler…" : "Händler auswählen…"}</option>
+            {filteredDealers.map((dealer) => (
+              <option key={dealer.id} value={dealer.id}>
+                {dealer.name} · {dealer.zip ?? "—"} {dealer.city ?? ""}
+              </option>
+            ))}
+          </select>
+          <Input
+            value={customerNo}
+            onChange={(e) => setCustomerNo(e.target.value)}
+            placeholder="Kundennummer"
+            className="w-full md:w-[160px]"
+          />
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold">Sidebar</div>
-              <MarketBadge market={market} />
+      <Card>
+        <CardHeader className="text-sm font-semibold">Händler &amp; Bestellung öffnen</CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          <div className="text-xs text-slate-500">
+            {dealerRestricted
+              ? "Es werden nur Händler aus deinem Gebiet angezeigt."
+              : "Admins sehen alle Händler. Kundennummer ist optional."}
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Input
+                value={dealerQuery}
+                onChange={(e) => setDealerQuery(e.target.value)}
+                placeholder="Händler suchen…"
+              />
             </div>
-            <div className="mt-1 text-xs text-slate-500">
-              Zum Durchtesten nutzen wir erstmal Dummy-Lagerbestand.
+            <div className="space-y-2">
+              <Button className="w-full" onClick={handleStartOrder} disabled={!selectedDealer || dealerLoading}>
+                Ordertool anzeigen
+              </Button>
+              {dealerError ? <div className="text-xs text-rose-600">{dealerError}</div> : null}
             </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {showHelp && (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
-                <div className="font-semibold">So testest du es schnell:</div>
-                <ol className="mt-2 list-decimal space-y-1 pl-4">
-                  <li>Im Generator Regeln/Schwellen + Preisbuch wie gewohnt auswählen.</li>
-                  <li>Beim Lagerbestand nimmst du diese Dummy-Datei (Download unten).</li>
-                  <li>Market stellst du hier oben auf DE/AT oder CH – im Generator wählst du entsprechend das passende Template.</li>
-                </ol>
-              </div>
-            )}
+          </div>
+        </CardContent>
+      </Card>
 
-            <div className="grid gap-2">
-              <a href={links.dummyStock} download>
-                <Button className="w-full" variant="secondary">Dummy-Lagerbestand herunterladen</Button>
-              </a>
-              <a href={links.templateDE} download>
-                <Button className="w-full" variant="secondary">Template DE/AT herunterladen</Button>
-              </a>
-              <a href={links.templateCH} download>
-                <Button className="w-full" variant="secondary">Template CH herunterladen</Button>
-              </a>
+      <Card>
+        <CardHeader className="text-sm font-semibold">Ordertool</CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          {iframeSrc ? (
+            <div className="rounded-xl border border-slate-200 overflow-hidden">
+              <iframe
+                ref={iframeRef}
+                title="Ordertool"
+                src={iframeSrc}
+                className="h-[900px] w-full"
+              />
             </div>
-
+          ) : (
             <div className="text-xs text-slate-500">
-              Hinweis: Aus Sicherheitsgründen kann die App die Dateiauswahl im Generator nicht automatisch befüllen.
-              Du lädst die Dateien im Generator wie bisher über dessen Upload-Felder.
+              Bitte Händler auswählen und „Ordertool anzeigen“ klicken, um die Bestellung hier zu öffnen.
             </div>
-          </CardContent>
-        </Card>
+          )}
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-semibold">Generator</div>
-                <div className="mt-1 text-xs text-slate-500">läuft als eingebettete HTML-Datei</div>
-              </div>
-              <MarketBadge market={market} />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <iframe
-              key={market}
-              src={generatorSrc}
-              className="h-[78vh] w-full rounded-xl border border-slate-200 bg-white"
-              title="FLYER Ordertool Generator"
-            />
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardHeader className="text-sm font-semibold">Hinweise</CardHeader>
+        <CardContent className="text-xs text-slate-600 space-y-2">
+          <p>
+            Für Tests kannst du weiterhin die Dummy-Lagerbestände und HTML-Templates aus der Admin-Ansicht laden.
+          </p>
+          <p>
+            Händlername und Kundennummer werden beim Öffnen des Ordertools automatisch übernommen, wenn sie hier
+            eingegeben wurden.
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }

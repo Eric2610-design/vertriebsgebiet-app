@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import RequireRole from "@/components/RequireRole";
+import { Button, Card, CardContent, CardHeader, Input, Select } from "@/components/ui";
 
 type Market = "DE_AT" | "CH";
 type Motor = "PANASONIC" | "BOSCH";
@@ -18,6 +19,19 @@ type ThresholdRule = {
 type ThresholdSettings = {
   version: number;
   rules: ThresholdRule[];
+};
+
+type AttributeRule = {
+  attribute: string;
+  match: string;
+  minQty: number;
+  factor: number;
+  active: boolean;
+};
+
+type AttributeRuleSettings = {
+  version: number;
+  rules: AttributeRule[];
 };
 
 const DEFAULT_SETTINGS: ThresholdSettings = {
@@ -80,18 +94,34 @@ export default function PricingThresholdsPage() {
   const [filterMotor, setFilterMotor] = useState<Motor | "ALL">("ALL");
   const [filterFix, setFilterFix] = useState<"ALL" | "FIX" | "NONFIX">("ALL");
 
+  const [attributes, setAttributes] = useState<Record<string, string[]>>({});
+  const [attributeRules, setAttributeRules] = useState<AttributeRule[]>([]);
+  const [rulesMsg, setRulesMsg] = useState<string>("");
+  const [rulesLoading, setRulesLoading] = useState(false);
+  const [rulesSaving, setRulesSaving] = useState(false);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
+      setRulesLoading(true);
       try {
-        const res = await fetch("/api/settings?key=pricing_thresholds");
+        const [res, rulesRes] = await Promise.all([
+          fetch("/api/settings?key=pricing_thresholds"),
+          fetch("/api/ordertool/data", { cache: "no-store" }),
+        ]);
         const json = await res.json();
+        const rulesJson = await rulesRes.json().catch(() => ({}));
         const loaded = json?.value?.rules ? (json.value as ThresholdSettings) : null;
         setRules(normalizeRules(loaded?.rules ?? []));
+        setAttributes(rulesJson?.attributes ?? {});
+        setAttributeRules(rulesJson?.rules ?? []);
       } catch {
         setRules([]);
+        setAttributes({});
+        setAttributeRules([]);
       } finally {
         setLoading(false);
+        setRulesLoading(false);
       }
     })();
   }, []);
@@ -118,6 +148,27 @@ export default function PricingThresholdsPage() {
     setRules((prev) => [
       ...prev,
       { market: "DE_AT", motor: "PANASONIC", requiresFixprice: false, minQty: 10, factor: 2.2, active: true },
+    ]);
+  }
+
+  const attributeKeys = useMemo(() => {
+    return Object.keys(attributes).filter((key) => (attributes[key] ?? []).length > 0);
+  }, [attributes]);
+
+  function updateAttributeRule(idx: number, patch: Partial<AttributeRule>) {
+    setAttributeRules((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  }
+
+  function removeAttributeRule(idx: number) {
+    setAttributeRules((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function addAttributeRule() {
+    const nextAttribute = attributeKeys[0] ?? "motor";
+    const nextMatch = attributes[nextAttribute]?.[0] ?? "";
+    setAttributeRules((prev) => [
+      ...prev,
+      { attribute: nextAttribute, match: nextMatch, minQty: 10, factor: 2.5, active: true },
     ]);
   }
 
@@ -150,6 +201,33 @@ export default function PricingThresholdsPage() {
     setSaving(false);
   }
 
+  async function saveAttributeRules() {
+    setRulesMsg("");
+    setRulesSaving(true);
+    try {
+      const payload: AttributeRuleSettings = {
+        version: 1,
+        rules: attributeRules.map((r) => ({
+          ...r,
+          minQty: Number.isFinite(Number(r.minQty)) ? Math.max(1, Math.floor(Number(r.minQty))) : 1,
+          factor: Number.isFinite(Number(r.factor)) ? Number(r.factor) : 1,
+          active: !!r.active,
+        })),
+      };
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key: "ordertool_attribute_rules_v1", value: payload }),
+      });
+      if (!res.ok) throw new Error("Speichern fehlgeschlagen.");
+      setRulesMsg("Gespeichert.");
+    } catch (e: any) {
+      setRulesMsg(e?.message ?? "Speichern fehlgeschlagen.");
+    } finally {
+      setRulesSaving(false);
+    }
+  }
+
   return (
     <RequireRole allow={["admin", "superadmin"]}>
       <div className="mx-auto max-w-6xl p-4 md:p-8 space-y-4">
@@ -162,25 +240,15 @@ export default function PricingThresholdsPage() {
           </div>
 
           <div className="flex gap-2 flex-wrap">
-            <button
-              onClick={loadDefault}
-              className="rounded-xl border px-3 py-2 text-sm hover:bg-neutral-50"
-            >
+            <Button variant="secondary" onClick={loadDefault}>
               Default laden
-            </button>
-            <button
-              onClick={addRule}
-              className="rounded-xl border px-3 py-2 text-sm hover:bg-neutral-50"
-            >
+            </Button>
+            <Button variant="secondary" onClick={addRule}>
               + Schwelle
-            </button>
-            <button
-              onClick={save}
-              disabled={saving}
-              className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-            >
+            </Button>
+            <Button onClick={save} disabled={saving}>
               Speichern
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -350,6 +418,118 @@ export default function PricingThresholdsPage() {
             </table>
           </div>
         )}
+
+        <Card>
+          <CardHeader className="flex items-center justify-between">
+            <div>
+              <div className="font-medium">Ordertool: Attribut-Regeln</div>
+              <div className="text-sm text-slate-600">
+                Attribute und Werte stammen aus dem aktuellen Lagerbestandssnapshot.
+              </div>
+            </div>
+            <span className="text-xs text-slate-500">{rulesLoading ? "lädt…" : "bereit"}</span>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={addAttributeRule}>
+                + Regel
+              </Button>
+              <Button onClick={saveAttributeRules} disabled={rulesSaving}>
+                {rulesSaving ? "Speichert…" : "Speichern"}
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              {attributeRules.length ? (
+                attributeRules.map((rule, idx) => {
+                  const values = attributes[rule.attribute] ?? [];
+                  return (
+                    <div key={`${rule.attribute}-${idx}`} className="rounded-xl border p-3 space-y-2">
+                      <div className="flex flex-wrap gap-2 items-end">
+                        <div className="min-w-[160px]">
+                          <label className="text-xs text-slate-500">Attribut</label>
+                          <Select
+                            value={rule.attribute}
+                            onChange={(e) =>
+                              updateAttributeRule(idx, {
+                                attribute: e.target.value,
+                                match: attributes[e.target.value]?.[0] ?? "",
+                              })
+                            }
+                          >
+                            {attributeKeys.length ? (
+                              attributeKeys.map((attr) => (
+                                <option key={attr} value={attr}>
+                                  {attr}
+                                </option>
+                              ))
+                            ) : (
+                              <option value="">Keine Attribute</option>
+                            )}
+                          </Select>
+                        </div>
+
+                        <div className="min-w-[200px]">
+                          <label className="text-xs text-slate-500">Wert</label>
+                          <Select
+                            value={rule.match}
+                            onChange={(e) => updateAttributeRule(idx, { match: e.target.value })}
+                            disabled={!values.length}
+                          >
+                            <option value="">Wert wählen…</option>
+                            {values.map((val) => (
+                              <option key={val} value={val}>
+                                {val}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+
+                        <div className="w-32">
+                          <label className="text-xs text-slate-500">Mindestmenge</label>
+                          <Input
+                            type="number"
+                            min={1}
+                            value={rule.minQty}
+                            onChange={(e) => updateAttributeRule(idx, { minQty: Number(e.target.value) })}
+                          />
+                        </div>
+
+                        <div className="w-32">
+                          <label className="text-xs text-slate-500">Kalkulation</label>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min={0}
+                            value={rule.factor}
+                            onChange={(e) => updateAttributeRule(idx, { factor: Number(e.target.value) })}
+                          />
+                        </div>
+
+                        <label className="flex items-center gap-2 text-sm text-slate-600">
+                          <input
+                            type="checkbox"
+                            checked={rule.active}
+                            onChange={(e) => updateAttributeRule(idx, { active: e.target.checked })}
+                          />
+                          aktiv
+                        </label>
+
+                        <Button variant="secondary" onClick={() => removeAttributeRule(idx)}>
+                          Entfernen
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-sm text-slate-600">Noch keine Regeln vorhanden.</div>
+              )}
+            </div>
+
+            {rulesMsg ? <div className="text-sm text-slate-700">{rulesMsg}</div> : null}
+          </CardContent>
+        </Card>
       </div>
     </RequireRole>
   );
