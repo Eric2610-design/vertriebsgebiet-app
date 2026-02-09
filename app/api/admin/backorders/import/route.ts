@@ -8,6 +8,24 @@ export const dynamic = "force-dynamic";
 // Column letter -> zero-based index
 const COL = {
   A: 0,
+  B: 1,
+  D: 3,
+  G: 6,
+  M: 12,
+  N: 13,
+  V: 21,
+  Z: 25,
+  AA: 26,
+  AH: 33,
+  AK: 36,
+  AP: 41,
+  AR: 43,
+  AS: 44,
+} as const;
+
+const HEADER_COLS = {
+  A: 0,
+  B: 1,
   D: 3,
   G: 6,
   M: 12,
@@ -73,6 +91,16 @@ function parseExcelDate(v: any): string | null {
   return null;
 }
 
+function extractHeaders(headerRow: any[] | undefined) {
+  const headers: Record<string, string> = {};
+  for (const [key, idx] of Object.entries(HEADER_COLS)) {
+    const raw = headerRow?.[idx];
+    const value = normStr(raw);
+    headers[key] = value || key;
+  }
+  return headers;
+}
+
 export async function POST(req: Request) {
   try {
     await requireAdmin();
@@ -106,6 +134,7 @@ export async function POST(req: Request) {
   // Read as array-of-arrays to reliably address columns by letter.
   const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as any[][];
   if (!aoa.length) return bad("empty_sheet", 400);
+  const headers = extractHeaders(aoa[0]);
 
   const supabase = supabaseService();
 
@@ -152,6 +181,7 @@ export async function POST(req: Request) {
       col_v: normStr(row[COL.V]) || null,
       col_z: normStr(row[COL.Z]) || null,
       col_aa: normStr(row[COL.AA]) || null,
+      col_aa_date: parseExcelDate(row[COL.AA]),
       col_ah: normStr(row[COL.AH]) || null,
       col_ak: normStr(row[COL.AK]) || null,
       col_ap: normStr(row[COL.AP]) || null,
@@ -182,6 +212,7 @@ export async function POST(req: Request) {
     rows_imported: inserted,
     skipped_no_article: skippedNoArticle,
     skipped_no_date: skippedNoDate,
+    headers,
   };
 
   await supabase.from("backorder_runs").update({ stats }).eq("id", run.id);
