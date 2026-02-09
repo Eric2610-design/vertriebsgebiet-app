@@ -6,11 +6,15 @@ import { Card, CardContent, Button } from "@/components/ui";
 
 export default function BackordersImportPage() {
   const [file, setFile] = useState<File | null>(null);
-  const [log, setLog] = useState<string>("");
+  const [status, setStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
+  const [result, setResult] = useState<any | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function runImport() {
     if (!file) return;
-    setLog("Import läuft…");
+    setStatus("uploading");
+    setError(null);
+    setResult(null);
 
     const fd = new FormData();
     fd.append("file", file);
@@ -19,11 +23,17 @@ export default function BackordersImportPage() {
     const json = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      setLog(`❌ Fehler: ${json?.error ?? res.statusText}\n${json?.run_id ? "run_id: " + json.run_id : ""}`);
+      if (res.status === 403) {
+        setError("Keine Berechtigung");
+      } else {
+        setError(`${json?.error ?? res.statusText}${json?.run_id ? ` (run_id: ${json.run_id})` : ""}`);
+      }
+      setStatus("error");
       return;
     }
 
-    setLog(`✅ OK\nrun_id: ${json.run_id}\n${JSON.stringify(json.stats, null, 2)}`);
+    setResult(json);
+    setStatus("done");
   }
 
   return (
@@ -40,14 +50,26 @@ export default function BackordersImportPage() {
           <CardContent>
             <div className="space-y-3">
               <input type="file" accept=".xlsx" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-              <Button onClick={runImport} disabled={!file}>
-                Import starten
+              <Button onClick={runImport} disabled={!file || status === "uploading"}>
+                {status === "uploading" ? "Import läuft…" : "Import starten"}
               </Button>
             </div>
           </CardContent>
         </Card>
 
-        {log ? <pre className="rounded-2xl border bg-neutral-50 p-4 text-xs overflow-auto">{log}</pre> : null}
+        {status === "uploading" ? (
+          <div className="text-sm text-neutral-600">Upload läuft…</div>
+        ) : null}
+
+        {error ? (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</div>
+        ) : null}
+
+        {result ? (
+          <pre className="rounded-2xl border bg-neutral-50 p-4 text-xs overflow-auto">
+            {JSON.stringify(result, null, 2)}
+          </pre>
+        ) : null}
       </div>
     </RequireRole>
   );
