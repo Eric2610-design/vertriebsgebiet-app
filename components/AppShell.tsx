@@ -73,6 +73,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Sidebar (Desktop) */}
       <aside className="hidden md:fixed md:inset-y-0 md:flex md:w-64 md:flex-col md:border-r md:border-black md:bg-black">
         <div className="flex items-center gap-3 px-4 py-4">
+          <div className="rounded-2xl bg-white/10 px-2 py-1 text-xs font-semibold text-white">
+            hat geklappt
+          </div>
+          <div className="leading-tight">
+            <div className="text-sm font-semibold text-white">Dealer Tool</div>
+            <div className="text-xs text-slate-300">Händlerkarte</div>
           <div className="flex h-12 w-12 items-center justify-center overflow-hidden">
             <img src="/brands/flyer.png" alt="FLYER" className="h-12 w-12 object-contain" />
           </div>
@@ -138,6 +144,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             ←
           </button>
           <div className="flex items-center gap-2">
+            <div className="rounded-2xl bg-white/10 px-2 py-1 text-xs font-semibold text-white">
+              hat geklappt
+            </div>
+            <div className="text-sm font-semibold text-white">Dealer Tool</div>
             <img src="/brands/flyer.png" alt="FLYER" className="h-8 w-8 object-contain" />
           </div>
           <div className="flex items-center gap-2">
