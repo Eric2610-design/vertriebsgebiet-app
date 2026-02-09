@@ -525,7 +525,10 @@ export default function MapPage() {
           <div style="font-size:12px;color:#475569">${escapeHtml(`${d.zip ?? ""} ${d.city ?? ""}`.trim())}</div>
           <div style="margin-top:6px;font-size:12px">${icons ? `<b>Marken:</b> ${icons}` : ""}</div>
           ${repNames ? `<div style="margin-top:4px;font-size:12px"><b>AD:</b> ${escapeHtml(repNames)}</div>` : ""}
-          <div style="margin-top:8px"><a href="/dealer/${encodeURIComponent(d.id)}" style="color:#2563eb;text-decoration:underline">Details öffnen</a></div>
+          <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:10px">
+            <a href="/dealer/${encodeURIComponent(d.id)}" style="color:#2563eb;text-decoration:underline">Details öffnen</a>
+            <a href="/dealer/${encodeURIComponent(d.id)}?openOrder=1" style="color:#0f172a;text-decoration:underline">Bestellung starten</a>
+          </div>
         </div>
       `;
 
