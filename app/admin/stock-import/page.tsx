@@ -20,6 +20,7 @@ type StockItem = {
   motor_brand: string | null;
   avail_now: number | null;
   avail_total: number | null;
+  raw?: Record<string, any> | null;
 };
 
 type StockSummaryFilter = {
@@ -40,6 +41,28 @@ const SUMMARY_GROUP_FIELDS = [
   { key: "color", label: "Farbe" },
   { key: "battery", label: "Akku" },
 ] as const;
+
+const toNumber = (value: unknown): number => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().replace(/\./g, "").replace(",", ".");
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
+const stockNow = (item: StockItem): number => Math.max(0, toNumber(item.avail_now));
+
+const buildSuggestion = (item: StockItem): number => {
+  const rawValue = item.raw?.["Menge Produktions-vorschlag"];
+  if (rawValue === undefined || rawValue === null || rawValue === "") {
+    const total = toNumber(item.avail_total);
+    const now = toNumber(item.avail_now);
+    return Math.max(total - now, 0);
+  }
+  return Math.max(0, toNumber(rawValue));
+};
 
 export default function StockImportPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -100,9 +123,8 @@ export default function StockImportPage() {
     const sum = (items: StockItem[]) =>
       items.reduce(
         (acc, item) => {
-          const now = Number(item.avail_now ?? 0) || 0;
-          const total = Number(item.avail_total ?? 0) || 0;
-          const build = Math.max(total - now, 0);
+          const now = stockNow(item);
+          const build = buildSuggestion(item);
           acc.lagernd += now;
           acc.zuBauen += build;
           return acc;
@@ -120,9 +142,8 @@ export default function StockImportPage() {
     const map = new Map<string, { lagernd: number; zuBauen: number; skus: number }>();
     for (const item of filteredSummaryItems) {
       const key = String(item[summaryGroupBy as keyof StockItem] ?? "").trim() || "(leer)";
-      const now = Number(item.avail_now ?? 0) || 0;
-      const total = Number(item.avail_total ?? 0) || 0;
-      const build = Math.max(total - now, 0);
+      const now = stockNow(item);
+      const build = buildSuggestion(item);
       const entry = map.get(key) ?? { lagernd: 0, zuBauen: 0, skus: 0 };
       entry.lagernd += now;
       entry.zuBauen += build;
@@ -262,7 +283,7 @@ export default function StockImportPage() {
               <div className="rounded-2xl border border-slate-200 p-3">
                 <div className="text-xs text-slate-500">Gesamt zu bauen</div>
                 <div className="text-2xl font-semibold">{summaryTotals.all.zuBauen.toLocaleString("de-CH")}</div>
-                <div className="text-xs text-slate-500">Gesamt minus freier Bestand (min. 0)</div>
+                <div className="text-xs text-slate-500">Summe „Menge Produktions-vorschlag“ (Spalte AA)</div>
               </div>
               <div className="rounded-2xl border border-slate-200 p-3">
                 <div className="text-xs text-slate-500">Bosch zu bauen</div>
