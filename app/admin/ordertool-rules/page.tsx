@@ -22,7 +22,17 @@ type OrdertoolRulesSettings = {
 
 type AttributeValues = Record<string, string[]>;
 
-const DEFAULT_ATTRIBUTES = ["motor", "status", "battery_tags", "preisart"];
+const DEFAULT_ATTRIBUTES = [
+  "motor",
+  "motor_type",
+  "family",
+  "model",
+  "frame",
+  "yearRule",
+  "status",
+  "battery_tags",
+  "preisart",
+];
 
 export default function OrdertoolRulesPage() {
   const [rules, setRules] = useState<OrdertoolRule[]>([]);
@@ -175,7 +185,7 @@ export default function OrdertoolRulesPage() {
           <div>
             <h1 className="text-2xl font-semibold">Ordertool · Regeln</h1>
             <p className="text-sm text-neutral-600">
-              Definiere Regeln wie: Wenn Attribut X = Y, dann gelten Schwellen/Kalkulationen Z.
+              Definiere Regeln aus Lagerbestandsfeldern (z. B. Motor, Modell, Rahmen) für Schwellen und Sonderpreise.
             </p>
           </div>
           <div className="flex gap-2">

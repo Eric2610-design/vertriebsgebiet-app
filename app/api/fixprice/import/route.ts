@@ -7,6 +7,13 @@ function normStr(v: any) {
   return String(v ?? "").trim();
 }
 
+function normNumber(v: any): number | null {
+  if (v === null || v === undefined) return null;
+  const raw = String(v).replace(/\s/g, "").replace(",", ".");
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : null;
+}
+
 function normMotor(v: any): string {
   const s = normStr(v).toUpperCase();
   if (s.includes("BOSCH")) return "BOSCH";
@@ -21,7 +28,13 @@ function isFixpriceFromPreisart(v: any): boolean {
   return s.length > 0;
 }
 
-function findColumns(rows: any[]): { articleKey: string; motorKey?: string; preisartKey?: string } | null {
+function findColumns(rows: any[]): {
+  articleKey: string;
+  motorKey?: string;
+  preisartKey?: string;
+  ekKey?: string;
+  uvpKey?: string;
+} | null {
   if (!rows.length) return null;
   const keys = Object.keys(rows[0] ?? {});
   const lower = keys.map((k) => [k, k.toLowerCase()]);
@@ -36,7 +49,13 @@ function findColumns(rows: any[]): { articleKey: string; motorKey?: string; prei
     ?? lower.find(([, l]) => l.includes("fixpreis"))?.[0]
     ?? lower.find(([, l]) => l.includes("sonderpreis"))?.[0];
 
-  return { articleKey: article, motorKey: motor, preisartKey: preisart };
+  const ek = lower.find(([, l]) => l === "ek" || l.includes("einkauf"))?.[0]
+    ?? lower.find(([, l]) => l.includes("ek"))?.[0];
+  const uvp = lower.find(([, l]) => l.includes("uvp"))?.[0]
+    ?? lower.find(([, l]) => l.includes("vk"))?.[0]
+    ?? lower.find(([, l]) => l.includes("verkauf"))?.[0];
+
+  return { articleKey: article, motorKey: motor, preisartKey: preisart, ekKey: ek, uvpKey: uvp };
 }
 
 export async function POST(req: Request) {
@@ -65,7 +84,7 @@ export async function POST(req: Request) {
     return bad(e?.message ?? "xlsx_parse_failed", 400);
   }
 
-  const byArticleNo: Record<string, { motor?: string; isFixprice: boolean }> = {};
+  const byArticleNo: Record<string, { motor?: string; isFixprice: boolean; preisart?: string; ek?: number | null; uvp?: number | null }> = {};
   let usedSheet: string | null = null;
   let totalRows = 0;
 
@@ -94,8 +113,16 @@ export async function POST(req: Request) {
       // If we don't have explicit preisart col, fall back to "Spalte E": cannot reliably address in json.
       const preisartVal = cols.preisartKey ? r[cols.preisartKey] : "";
       const isFix = isFixpriceFromPreisart(preisartVal);
+      const ek = cols.ekKey ? normNumber(r[cols.ekKey]) : null;
+      const uvp = cols.uvpKey ? normNumber(r[cols.uvpKey]) : null;
 
-      byArticleNo[art] = { motor, isFixprice: isFix };
+      byArticleNo[art] = {
+        motor,
+        isFixprice: isFix,
+        preisart: normStr(preisartVal) || undefined,
+        ek,
+        uvp,
+      };
       totalRows += 1;
     }
     break; // first matching sheet wins

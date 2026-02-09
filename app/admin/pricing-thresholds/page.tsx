@@ -184,6 +184,21 @@ export default function PricingThresholdsPage() {
           </div>
         </div>
 
+        <div className="rounded-2xl border bg-white p-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="font-medium">Sonderregeln · Ordertool</div>
+            <div className="text-sm text-neutral-600">
+              Attribute-basierte Regeln aus Lagerbestandsdaten (z.&nbsp;B. Modell, Rahmen, Preisart).
+            </div>
+          </div>
+          <a
+            href="/admin/ordertool-rules"
+            className="rounded-xl border px-3 py-2 text-sm hover:bg-neutral-50"
+          >
+            Regeln öffnen
+          </a>
+        </div>
+
         {msg && <div className="rounded-xl border bg-neutral-50 p-3 text-sm">{msg}</div>}
 
         <div className="rounded-2xl border bg-white p-4 flex flex-wrap gap-3 items-end">
