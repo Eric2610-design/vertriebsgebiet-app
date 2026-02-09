@@ -177,10 +177,7 @@ export default function GeoMergePage() {
           <h1 className="text-xl font-semibold">Händler ohne Geodaten</h1>
           <p className="text-slate-600 text-sm">PLZ-sortiert · Vorschläge mit Ähnlichkeit · Merge wie beim Einkaufsverband.</p>
         </div>
-        <div className="flex gap-2">
-          <Link href="/admin" className="text-sm text-blue-600 hover:underline">Admin</Link>
-          <Link href="/admin/geo-merge/overview" className="text-sm text-blue-600 hover:underline">Übersicht</Link>
-        </div>
+        <div />
       </div>
 
       {err ? <div className="text-sm text-red-700 mb-4">{err}</div> : null}
