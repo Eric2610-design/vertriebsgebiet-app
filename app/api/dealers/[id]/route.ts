@@ -2,6 +2,8 @@ import { z } from "zod";
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
 import { normText } from "@/lib/normalize";
+import { getDealerScope, dealerInTerritory } from "@/app/api/_dealerScope";
+import { requireAdmin } from "@/app/api/_admin";
 
 const DealerUpdateSchema = z.object({
   dealer: z.object({
@@ -33,6 +35,11 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
     .maybeSingle();
   if (error) return bad(error.message, 500);
   if (!dealer) return ok({ dealer: null });
+
+  const scope = await getDealerScope();
+  if (scope && !dealerInTerritory(dealer as any, scope.territories, scope.allowedCountries)) {
+    return bad("forbidden", 403);
+  }
 
   let buying_group: any = null;
   if ((dealer as any).buying_group_key) {
@@ -82,6 +89,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
 export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const params = await ctx.params;
   try {
+    await requireAdmin();
     const supabase = supabaseService();
     const body = DealerUpdateSchema.parse(await req.json());
 
@@ -125,6 +133,7 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
 
 export async function DELETE(_: Request, ctx: { params: Promise<{ id: string }> }) {
   const params = await ctx.params;
+  await requireAdmin();
   const supabase = supabaseService();
   const { error } = await supabase.from("dealers").delete().eq("id", params.id);
   if (error) return bad(error.message, 500);

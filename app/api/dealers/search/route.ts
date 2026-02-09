@@ -1,8 +1,10 @@
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
+import { getDealerScope, dealerInTerritory } from "@/app/api/_dealerScope";
 
 export async function GET(req: Request) {
   const supabase = supabaseService();
+  const scope = await getDealerScope();
   const url = new URL(req.url);
   const q = (url.searchParams.get("q") ?? "").trim();
 
@@ -36,12 +38,16 @@ export async function GET(req: Request) {
   }
   if (error) return bad(error.message, 500);
 
-  const items = (data ?? []).map((d: any) => {
+  let items = (data ?? []).map((d: any) => {
     const manufacturer_keys = (d.dealer_manufacturers ?? []).map((x: any) => x.manufacturer_key);
     // keep payload small
     const { dealer_manufacturers, ...rest } = d;
     return { ...rest, manufacturer_keys };
   });
+
+  if (scope) {
+    items = items.filter((d: any) => dealerInTerritory(d, scope.territories, scope.allowedCountries));
+  }
 
   return ok({ items });
 }

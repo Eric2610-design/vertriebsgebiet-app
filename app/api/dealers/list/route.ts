@@ -1,9 +1,11 @@
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
+import { getDealerScope, dealerInTerritory } from "@/app/api/_dealerScope";
 
 export async function GET() {
   try {
     const supabase = supabaseService();
+    const scope = await getDealerScope();
 
     const step = 1000;
     let from = 0;
@@ -54,12 +56,17 @@ export async function GET() {
       from += step;
     }
 
-    const items = all.map((d: any) => {
+    let items = all.map((d: any) => {
       const manufacturer_keys = (d.dealer_manufacturers ?? []).map((x: any) => x.manufacturer_key);
       const has_flyer = manufacturer_keys.includes("flyer");
       delete d.dealer_manufacturers;
       return { ...d, has_flyer, manufacturer_keys };
     });
+
+    // Server-side visibility restriction for reps (country + optional PLZ-territories)
+    if (scope) {
+      items = items.filter((d: any) => dealerInTerritory(d, scope.territories, scope.allowedCountries));
+    }
 
     return ok({ items });
   } catch (e: any) {

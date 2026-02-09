@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
+import { getDealerScope, dealerInTerritory } from "@/app/api/_dealerScope";
 
 // Export a set of dealer ids to an .xlsx file.
 // Used for the "Händler im Kartenausschnitt" list.
@@ -11,6 +12,7 @@ export async function POST(req: Request) {
     if (!ids.length) return bad("Keine Händler-IDs übergeben", 400);
 
     const supabase = supabaseService();
+    const scope = await getDealerScope();
     const { data, error } = await supabase
       .from("dealers")
       .select(
@@ -23,7 +25,9 @@ export async function POST(req: Request) {
 
     if (error) return bad(error.message, 500);
 
-    const rows = (data ?? []).map((d: any) => {
+    const scoped = scope ? (data ?? []).filter((d: any) => dealerInTerritory(d, scope.territories, scope.allowedCountries)) : (data ?? []);
+
+    const rows = scoped.map((d: any) => {
       const manufacturer_keys = (d.dealer_manufacturers ?? []).map((x: any) => x.manufacturer_key).join(",");
       return {
         id: d.id,
