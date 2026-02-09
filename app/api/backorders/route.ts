@@ -8,11 +8,13 @@ type Row = {
   id: string;
   article_no: string;
   order_date: string | null;
+  order_no: string | null;
   col_a: string | null;
   col_m: string | null;
   col_v: string | null;
   col_z: string | null;
   col_aa: string | null;
+  col_aa_date: string | null;
   col_ah: string | null;
   col_ak: string | null;
   col_ap: string | null;
@@ -21,6 +23,7 @@ type Row = {
   customer_no: string | null;
   dealer_name: string | null;
   dealer_country: string | null;
+  dealer_id: string | null;
 };
 
 function isCH(country: string | null) {
@@ -38,7 +41,7 @@ export async function GET() {
 
   const { data: run, error: runErr } = await supabase
     .from("backorder_runs")
-    .select("id")
+    .select("id, stats")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -49,7 +52,7 @@ export async function GET() {
   let query = supabase
     .from("backorder_items")
     .select(
-      "id, article_no, order_date, col_a, col_m, col_v, col_z, col_aa, col_ah, col_ak, col_ap, col_ar, col_as, customer_no, dealer_name, dealer_country"
+      "id, article_no, order_date, order_no, col_a, col_m, col_v, col_z, col_aa, col_aa_date, col_ah, col_ak, col_ap, col_ar, col_as, customer_no, dealer_name, dealer_country, dealer_id"
     )
     .eq("run_id", run.id)
     .limit(5000);
@@ -59,6 +62,39 @@ export async function GET() {
   if (rowsErr) return NextResponse.json({ error: rowsErr.message }, { status: 500 });
 
   const safeRows = (rows ?? []) as unknown as Row[];
+  const rawHeaders = (run as any)?.stats?.headers as Record<string, string> | undefined;
+  const headerKeys = ["A", "B", "D", "G", "M", "N", "V", "Z", "AA", "AH", "AK", "AP", "AR", "AS"];
+  const headers = headerKeys.reduce<Record<string, string>>((acc, key) => {
+    const label = String(rawHeaders?.[key] ?? "").trim();
+    acc[key] = label || key;
+    return acc;
+  }, {});
+
+  const orderSet = new Set<string>();
+  const articleSet = new Set<string>();
+  let chCount = 0;
+  let nonChCount = 0;
+  let matchedDealers = 0;
+  let unmatchedDealers = 0;
+
+  for (const row of safeRows) {
+    if (row.col_a) orderSet.add(row.col_a);
+    if (row.article_no) articleSet.add(row.article_no);
+    if (isCH(row.dealer_country)) chCount++;
+    else nonChCount++;
+    if (row.dealer_id) matchedDealers++;
+    else unmatchedDealers++;
+  }
+
+  const summary = {
+    rows: safeRows.length,
+    orders: orderSet.size,
+    articles: articleSet.size,
+    ch: chCount,
+    non_ch: nonChCount,
+    matched_dealers: matchedDealers,
+    unmatched_dealers: unmatchedDealers,
+  };
 
   // global sequence per article_no (oldest first)
   const byArticle = new Map<string, Row[]>();
@@ -129,5 +165,5 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json({ ok: true, run, rows: result });
+  return NextResponse.json({ ok: true, run, rows: result, summary, headers });
 }

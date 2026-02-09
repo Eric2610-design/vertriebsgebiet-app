@@ -24,6 +24,7 @@ create table if not exists public.backorder_items (
   col_v text,
   col_z text,
   col_aa text,
+  col_aa_date date,
   col_ah text,
   col_ak text,
   col_ap text,
