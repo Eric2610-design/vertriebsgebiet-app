@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, Button, Input, Textarea, Badge } from "@/components/ui";
 import { Pictogram } from "@/components/Pictogram";
 import { DealerListPictos } from "@/components/DealerListPictos";
 import { BUYING_GROUP_ICON_FALLBACK } from "@/lib/pictograms";
-import { getArchiveOrders, getOpenOrder, loadOrderStore, openOrder, submitOrder } from "@/lib/ordertoolOrders";
 import type * as Leaflet from "leaflet";
 
 type ManufacturerItem = { key: string; label: string };
@@ -76,16 +74,6 @@ export default function DealerClient({ id }: { id: string }) {
     email: string;
     phone: string;
   }>({ role: "Geschaeftsfuehrer", name: "", email: "", phone: "" });
-
-  const searchParams = useSearchParams();
-  const [openOrderSummary, setOpenOrderSummary] = useState<ReturnType<typeof getOpenOrder> | null>(null);
-  const [orderArchive, setOrderArchive] = useState<ReturnType<typeof getArchiveOrders>>([]);
-  const handledOpenParamRef = useRef(false);
-
-  // Backorders for this dealer
-  const [backorders, setBackorders] = useState<any[]>([]);
-  const [backordersLoading, setBackordersLoading] = useState(false);
-  const [backordersError, setBackordersError] = useState<string>("");
 
   async function loadDealer() {
     const res = await fetch(`/api/dealers/${id}`, { cache: "no-store" });
@@ -164,29 +152,6 @@ export default function DealerClient({ id }: { id: string }) {
     }
   }
 
-  async function loadBackorders() {
-    setBackordersLoading(true);
-    setBackordersError("");
-    try {
-      const r = await fetch(`/api/backorders?dealerId=${encodeURIComponent(id)}&limit=10000`, { cache: "no-store" });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j?.error || "Rückstände konnten nicht geladen werden.");
-      setBackorders(Array.isArray(j?.rows) ? j.rows : []);
-    } catch (e: any) {
-      setBackorders([]);
-      setBackordersError(e?.message ?? "Rückstände konnten nicht geladen werden.");
-    } finally {
-      setBackordersLoading(false);
-    }
-  }
-
-  const refreshOrdertool = useCallback(() => {
-    const dealerName = dealer?.dealer?.name ?? "";
-    const store = loadOrderStore();
-    setOpenOrderSummary(getOpenOrder(store, id, dealerName));
-    setOrderArchive(getArchiveOrders(store, id, dealerName));
-  }, [dealer?.dealer?.name, id]);
-
   useEffect(() => {
     (async () => {
       try {
@@ -199,23 +164,8 @@ export default function DealerClient({ id }: { id: string }) {
       }
     })();
     loadAll();
-    loadBackorders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
-
-  useEffect(() => {
-    if (!dealer?.dealer) return;
-    refreshOrdertool();
-  }, [dealer?.dealer, refreshOrdertool]);
-
-  useEffect(() => {
-    if (!dealer?.dealer) return;
-    if (handledOpenParamRef.current) return;
-    if (searchParams.get("openOrder") !== "1") return;
-    handledOpenParamRef.current = true;
-    openOrder({ dealerId: id, dealerName: dealer.dealer.name });
-    refreshOrdertool();
-  }, [dealer?.dealer, id, refreshOrdertool, searchParams]);
 
   async function removeBuyingGroup() {
     if (!dealer?.buying_group) return;
@@ -647,39 +597,11 @@ Hinweis: ${sameZipForce ? "FORCE aktiv (ignoriert Adresse/Land/PLZ-Checks)." : "
     await loadDealer();
   }
 
-  const handleOpenOrder = () => {
-    openOrder({ dealerId: id, dealerName: dealer?.dealer?.name ?? "" });
-    refreshOrdertool();
-  };
-
-  const handleSubmitOrder = () => {
-    if (!openOrderSummary) return;
-    if (!confirm("Bestellung wirklich ins Archiv verschieben?")) return;
-    submitOrder({ dealerId: id, dealerName: dealer?.dealer?.name ?? "" });
-    refreshOrdertool();
-  };
-
   if (loading) return <div className="p-6 text-sm text-slate-600">Lade...</div>;
   if (!dealer?.dealer) return <div className="p-6 text-sm text-rose-600">Nicht gefunden</div>;
 
   const d = dealer.dealer;
   const hasFlyer = (dealer?.manufacturers ?? []).some((m: any) => m.key === "flyer");
-  const ordertoolMarket = d.country === "CH" ? "CH" : "DE";
-
-  const openOrdertool = () => {
-    try {
-      localStorage.setItem("flyer_market", ordertoolMarket);
-      localStorage.setItem("FLYER_ORDERTOOL_PREFILL_V1", JSON.stringify({
-        dealerId: id,
-        dealerName: d.name,
-        customerNo: "",
-      }));
-      const url = ordertoolMarket === "CH" ? "/ordertool/template_ch.html" : "/ordertool/template_de_at.html";
-      window.open(url, "_blank", "noopener,noreferrer");
-    } catch {
-      alert("Ordertool konnte nicht geöffnet werden.");
-    }
-  };
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-6">
@@ -732,108 +654,6 @@ Hinweis: ${sameZipForce ? "FORCE aktiv (ignoriert Adresse/Land/PLZ-Checks)." : "
                 </div>
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="text-sm font-semibold">Ordertool</CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div className="rounded-xl border border-slate-200 p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <div className="text-xs text-slate-500">Aktueller Warenkorb</div>
-                  {openOrderSummary ? (
-                    <div className="font-medium">
-                      {openOrderSummary.items} Artikel · {openOrderSummary.qty} Stück
-                    </div>
-                  ) : (
-                    <div className="text-sm text-slate-600">Noch kein Warenkorb eröffnet.</div>
-                  )}
-                  {openOrderSummary?.updatedAt ? (
-                    <div className="text-xs text-slate-500">
-                      Zuletzt aktualisiert: {new Date(openOrderSummary.updatedAt).toLocaleString()}
-                    </div>
-                  ) : null}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="secondary" onClick={handleOpenOrder}>Warenkorb eröffnen</Button>
-                  <Button variant="secondary" onClick={openOrdertool}>Ordertool öffnen</Button>
-                  <Button onClick={handleSubmitOrder} disabled={!openOrderSummary}>
-                    Bestellung abschicken
-                  </Button>
-                </div>
-              </div>
-              <div className="mt-2 text-xs text-slate-500">
-                Kundennummer ist optional. Beim Abschicken wird der Warenkorb ins Archiv verschoben.
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-200 p-3">
-              <div className="text-xs font-semibold text-slate-700">Archivierte Bestellungen</div>
-              {orderArchive.length === 0 ? (
-                <div className="mt-2 text-sm text-slate-600">Noch keine archivierten Bestellungen.</div>
-              ) : (
-                <ul className="mt-2 space-y-2">
-                  {orderArchive.slice(0, 5).map((entry) => (
-                    <li key={`${entry.updatedAt}-${entry.items}`} className="rounded-lg border border-slate-200 px-3 py-2">
-                      <div className="font-medium">{entry.items} Artikel · {entry.qty} Stück</div>
-                      <div className="text-xs text-slate-500">Abgeschickt: {new Date(entry.updatedAt).toLocaleString()}</div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="text-sm font-semibold">Auftragsrückstand</CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            {backordersLoading ? (
-              <div className="text-sm text-slate-600">Lade…</div>
-            ) : backordersError ? (
-              <div className="text-sm text-rose-700">{backordersError}</div>
-            ) : backorders.length === 0 ? (
-              <div className="text-sm text-slate-600">Keine Rückstände gefunden.</div>
-            ) : (
-              <div className="overflow-auto border rounded-xl">
-                <table className="min-w-full text-xs">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      <th className="text-left px-2 py-2 border-b">#</th>
-                      <th className="text-left px-2 py-2 border-b">Auftrag</th>
-                      <th className="text-left px-2 py-2 border-b">Pos</th>
-                      <th className="text-left px-2 py-2 border-b">Datum</th>
-                      <th className="text-left px-2 py-2 border-b">Artikel</th>
-                      <th className="text-left px-2 py-2 border-b">Rahmen</th>
-                      <th className="text-left px-2 py-2 border-b">M</th>
-                      <th className="text-left px-2 py-2 border-b">V</th>
-                      <th className="text-left px-2 py-2 border-b">Z</th>
-                      <th className="text-left px-2 py-2 border-b">Preis</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {backorders.slice(0, 50).map((r: any) => (
-                      <tr key={r.id} className="border-b last:border-b-0">
-                        <td className="px-2 py-2 whitespace-nowrap">{r.order_seq ?? ""}</td>
-                        <td className="px-2 py-2 whitespace-nowrap">{r.order_no ?? ""}</td>
-                        <td className="px-2 py-2 whitespace-nowrap">{r.pos_no ?? ""}</td>
-                        <td className="px-2 py-2 whitespace-nowrap">{r.order_date ? new Date(r.order_date).toLocaleDateString() : ""}</td>
-                        <td className="px-2 py-2 whitespace-nowrap">{r.article_no ?? ""}</td>
-                        <td className="px-2 py-2 whitespace-nowrap">{r.frame_size ?? ""}</td>
-                        <td className="px-2 py-2 whitespace-nowrap">{r.col_m ?? ""}</td>
-                        <td className="px-2 py-2 whitespace-nowrap">{r.col_v ?? ""}</td>
-                        <td className="px-2 py-2 whitespace-nowrap">{r.col_z ?? ""}</td>
-                        <td className="px-2 py-2 whitespace-nowrap">{r.price_col ?? ""}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {backorders.length > 50 ? (
-              <div className="text-xs text-slate-500">Es werden nur die ersten 50 Zeilen angezeigt. Gesammt: {backorders.length}</div>
-            ) : null}
           </CardContent>
         </Card>
 

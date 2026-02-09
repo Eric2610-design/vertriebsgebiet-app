@@ -6,10 +6,9 @@ import { getVtRole } from "@/app/api/_admin";
 
 type Row = {
   id: string;
-  order_no: string | null;
-  pos_no: string | null;
   article_no: string;
   order_date: string | null;
+  col_a: string | null;
   col_m: string | null;
   col_v: string | null;
   col_z: string | null;
@@ -22,27 +21,21 @@ type Row = {
   customer_no: string | null;
   dealer_name: string | null;
   dealer_country: string | null;
-  dealer_id: string | null;
 };
 
 function isCH(country: string | null) {
   return String(country ?? "").toUpperCase() === "CH";
 }
 
-function safeLike(q: string) {
-  return q.replace(/[%_]/g, "\\$&");
-}
-
 export async function GET(req: Request) {
   const role = await getVtRole();
   if (!role) return NextResponse.json({ error: "not_authenticated" }, { status: 401 });
 
-  const url = new URL(req.url);
-  const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
-  const dealerId = (url.searchParams.get("dealerId") ?? "").trim();
-  const limit = Math.min(10000, Math.max(1, Number(url.searchParams.get("limit") ?? "5000")));
-
   const supabase = supabaseService();
+
+  const url = new URL(req.url);
+  const limit = Math.min(5000, Math.max(1, Number(url.searchParams.get("limit") ?? "2000")));
+  const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
 
   const { data: run, error: runErr } = await supabase
     .from("backorder_runs")
@@ -54,28 +47,29 @@ export async function GET(req: Request) {
   if (runErr) return NextResponse.json({ error: runErr.message }, { status: 500 });
   if (!run) return NextResponse.json({ ok: true, run: null, rows: [] });
 
-  // Always fetch the whole latest snapshot (up to limit) to keep order_seq global.
   let query = supabase
     .from("backorder_items")
     .select(
-      "id, order_no, pos_no, article_no, order_date, col_m, col_v, col_z, col_aa, col_ah, col_ak, col_ap, col_ar, col_as, customer_no, dealer_name, dealer_country, dealer_id"
+      "id, article_no, order_date, col_a, col_m, col_v, col_z, col_aa, col_ah, col_ak, col_ap, col_ar, col_as, customer_no, dealer_name, dealer_country"
     )
     .eq("run_id", run.id)
     .limit(limit);
 
+  // basic search server-side on a few fields (optional)
   if (q) {
-    const s = safeLike(q);
+    // PostgREST OR syntax
     query = query.or(
-      `article_no.ilike.%${s}%,customer_no.ilike.%${s}%,dealer_name.ilike.%${s}%,order_no.ilike.%${s}%`
+      `article_no.ilike.%${q}%,customer_no.ilike.%${q}%,dealer_name.ilike.%${q}%`
     );
   }
 
   const { data: rows, error: rowsErr } = await query;
+
   if (rowsErr) return NextResponse.json({ error: rowsErr.message }, { status: 500 });
 
   const safeRows = (rows ?? []) as unknown as Row[];
 
-  // global sequence per article_no (oldest first) — must not change with dealer filtering.
+  // global sequence per article_no (oldest first)
   const byArticle = new Map<string, Row[]>();
   for (const r of safeRows) {
     const key = String(r.article_no ?? "");
@@ -96,7 +90,7 @@ export async function GET(req: Request) {
     arr.forEach((r, i) => seqMap.set(r.id, i + 1));
   }
 
-  // frame_size from latest stock snapshot (match by sku == article_no)
+  // frame_size from latest stock snapshot (optional)
   let frameByArticle: Record<string, string> = {};
   try {
     const { data: stockRun } = await supabase
@@ -115,25 +109,26 @@ export async function GET(req: Request) {
         const chunk = uniqueArticles.slice(i, i + chunkSize);
         const { data: stockItems, error: stockErr } = await supabase
           .from("stock_items")
-          .select("sku, frame_size")
+          .select("article_no, frame_size")
           .eq("run_id", stockRun.id)
-          .in("sku", chunk);
+          .in("article_no", chunk);
 
         if (stockErr) throw stockErr;
 
         for (const si of stockItems ?? []) {
-          const a = String((si as any).sku ?? "");
+          const a = String((si as any).article_no ?? "");
           const fs = String((si as any).frame_size ?? "");
           if (a && fs) out[a] = fs;
         }
       }
+
       frameByArticle = out;
     }
   } catch {
     frameByArticle = {};
   }
 
-  const enriched = safeRows.map((r) => {
+  const result = safeRows.map((r) => {
     const country = r.dealer_country;
     return {
       ...r,
@@ -143,8 +138,5 @@ export async function GET(req: Request) {
     };
   });
 
-  // Optional dealer filter after global sequencing.
-  const filtered = dealerId ? enriched.filter((r: any) => String(r.dealer_id ?? "") === dealerId) : enriched;
-
-  return NextResponse.json({ ok: true, role, run, rows: filtered });
+  return NextResponse.json({ ok: true, role, run, rows: result });
 }

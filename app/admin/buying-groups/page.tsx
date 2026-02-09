@@ -25,7 +25,6 @@ export default function BuyingGroupsPage() {
 
   const [createKey, setCreateKey] = useState("");
   const [createLabel, setCreateLabel] = useState("");
-  const [showCreate, setShowCreate] = useState(false);
 
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<DealerHit[]>([]);
@@ -37,9 +36,6 @@ export default function BuyingGroupsPage() {
   // per-group merge selection (within member list)
   const [mergeSelByGroup, setMergeSelByGroup] = useState<Record<string, Record<string, boolean>>>({});
   const [mergeMasterByGroup, setMergeMasterByGroup] = useState<Record<string, string>>({});
-
-  // Accordion: nur ein Einkaufsverband gleichzeitig geöffnet
-  const [openKey, setOpenKey] = useState<string>("");
 
   async function load() {
     setErr("");
@@ -227,39 +223,36 @@ export default function BuyingGroupsPage() {
           <h1 className="text-xl font-semibold">Einkaufsverbände</h1>
           <p className="text-slate-600 text-sm">Übersicht und Zuordnung von Händlern zu Einkaufsverbänden.</p>
         </div>
-        <div />
+        <div className="flex gap-2">
+          <Link href="/map" className="text-sm text-blue-600 hover:underline">Zur Karte</Link>
+          <Link href="/admin/cleanup" className="text-sm text-blue-600 hover:underline">Cleanup</Link>
+          <Link href="/admin" className="text-sm text-blue-600 hover:underline">Admin</Link>
+        </div>
       </div>
 
       {err ? <div className="text-sm text-red-700 mb-4">{err}</div> : null}
 
       {isAdmin ? (
-        <Card className="mb-6">
-          <CardHeader className="flex items-center justify-between">
-            <div>
-              <div className="font-medium">Einkaufsverband anlegen</div>
-              <div className="text-sm text-slate-600">Zum Anlegen klickst du auf „Anlegen“, dann erscheinen die Felder.</div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge>{loading ? "lädt…" : "bereit"}</Badge>
-              <Button variant="secondary" onClick={() => setShowCreate((s) => !s)}>
-                {showCreate ? "Schließen" : "Anlegen"}
-              </Button>
-            </div>
-          </CardHeader>
-          {showCreate ? (
-            <CardContent className="flex flex-wrap gap-3 items-end">
-              <div className="w-44">
-                <label className="text-sm text-slate-700">Key</label>
-                <Input value={createKey} onChange={(e) => setCreateKey(e.target.value)} placeholder="z.B. zeg" />
-              </div>
-              <div className="w-64">
-                <label className="text-sm text-slate-700">Name</label>
-                <Input value={createLabel} onChange={(e) => setCreateLabel(e.target.value)} placeholder="z.B. ZEG" />
-              </div>
-              <Button onClick={createGroup}>Speichern</Button>
-            </CardContent>
-          ) : null}
-        </Card>
+      <Card className="mb-6">
+        <CardHeader className="flex items-center justify-between">
+          <div>
+            <div className="font-medium">Neuen Einkaufsverband anlegen (nur Admin)</div>
+            <div className="text-sm text-slate-600">Key z. B. "zeg" / "bico" / "bikeco".</div>
+          </div>
+          <Badge>{loading ? "lädt…" : "bereit"}</Badge>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-3 items-end">
+          <div className="w-44">
+            <label className="text-sm text-slate-700">Key</label>
+            <Input value={createKey} onChange={(e) => setCreateKey(e.target.value)} placeholder="key" />
+          </div>
+          <div className="w-64">
+            <label className="text-sm text-slate-700">Name</label>
+            <Input value={createLabel} onChange={(e) => setCreateLabel(e.target.value)} placeholder="Name" />
+          </div>
+          <Button onClick={createGroup}>Anlegen</Button>
+        </CardContent>
+      </Card>
       ) : null}
 
       {isAdmin ? (
@@ -378,17 +371,10 @@ export default function BuyingGroupsPage() {
       </Card>
       ) : null}
 
-      {/* Übersicht als Accordion: immer nur ein Verband offen */}
-      <div className="space-y-3">
-        {items.map((g) => {
-          const open = openKey === g.key;
-          return (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {items.map((g) => (
           <Card key={g.key}>
-            <CardHeader
-              className="flex items-center justify-between cursor-pointer select-none"
-              onClick={() => setOpenKey((cur) => (cur === g.key ? "" : g.key))}
-              title="Klicken zum Auf-/Zuklappen"
-            >
+            <CardHeader className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Pictogram kind="buying_group" k={g.key} label={g.label} dataUrl={g.icon_data_url} size={20} />
                 <div>
@@ -399,19 +385,12 @@ export default function BuyingGroupsPage() {
               <div className="flex items-center gap-2">
                 <Badge>{(g.dealers || []).length} Händler</Badge>
                 {isAdmin ? (
-                  <Button
-                    variant="secondary"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteGroup(g.key);
-                    }}
-                  >
+                  <Button variant="secondary" onClick={() => deleteGroup(g.key)}>
                     Löschen
                   </Button>
                 ) : null}
               </div>
             </CardHeader>
-            {open ? (
             <CardContent>
               {(g.dealers || []).length ? (
                 <div className="space-y-2">
@@ -485,10 +464,8 @@ export default function BuyingGroupsPage() {
                 <div className="text-sm text-slate-600">Keine Händler zugeordnet.</div>
               )}
             </CardContent>
-            ) : null}
           </Card>
-        );
-        })}
+        ))}
       </div>
     </main>
   );

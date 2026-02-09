@@ -132,6 +132,13 @@ export default function PricingPage() {
   const [fixMsg, setFixMsg] = useState<string>("");
   const [fixFile, setFixFile] = useState<File | null>(null);
 
+  // --- Maximalmenge je Artikel (Ordertool) ---
+  const [maxQtySetting, setMaxQtySetting] = useState<MaxQtySettings>({ version: 1, defaultMax: 40, overrides: {} });
+  const [maxQtyLoading, setMaxQtyLoading] = useState(true);
+  const [maxQtySaving, setMaxQtySaving] = useState(false);
+  const [maxQtyMsg, setMaxQtyMsg] = useState<string>("");
+  const [maxQtyOverridesText, setMaxQtyOverridesText] = useState<string>("");
+
   // --- Attribute rules from stock snapshot ---
   const [attrHeaders, setAttrHeaders] = useState<string[]>([]);
   const [attrHeader, setAttrHeader] = useState<string>("");
@@ -153,12 +160,14 @@ export default function PricingPage() {
     (async () => {
       setLoading(true);
       setFixLoading(true);
+      setMaxQtyLoading(true);
       setAttrLoading(true);
       try {
-        const [tRes, fRes, aRes, hRes] = await Promise.all([
+        const [tRes, fRes, aRes, mRes, hRes] = await Promise.all([
           fetch("/api/settings?key=pricing_thresholds", { cache: "no-store" }),
           fetch("/api/settings?key=fixprice_articles", { cache: "no-store" }),
           fetch("/api/settings?key=pricing_attribute_rules_v1", { cache: "no-store" }),
+          fetch("/api/settings?key=ordertool_max_qty_v1", { cache: "no-store" }),
           fetch("/api/admin/stock/attributes?mode=headers", { cache: "no-store" }),
         ]);
 
@@ -171,6 +180,13 @@ export default function PricingPage() {
         const loadedRules = normalizeRules(savedThresholds?.rules ?? defaultRules);
 
         const fixVal = (fJson?.setting?.value ?? null) as FixpriceSettingValue | null;
+        const maxQtyVal = (mJson?.setting?.value ?? null) as MaxQtySettings | null;
+        const nextMaxQty: MaxQtySettings = {
+          version: 1,
+          defaultMax: Number.isFinite(Number(maxQtyVal?.defaultMax)) ? Math.max(1, Math.floor(Number(maxQtyVal!.defaultMax))) : 40,
+          overrides: typeof maxQtyVal?.overrides === "object" && maxQtyVal?.overrides ? (maxQtyVal.overrides as any) : {},
+        };
+
         const attrVal = (aJson?.setting?.value ?? null) as PricingAttributeRuleSettings | null;
 
         const headers = Array.isArray(hJson?.headers) ? (hJson.headers as string[]) : [];
@@ -179,6 +195,12 @@ export default function PricingPage() {
         if (!alive) return;
         setRules(loadedRules);
         setFixSetting(fixVal);
+        setMaxQtySetting(nextMaxQty);
+        setMaxQtyOverridesText(
+          Object.entries(nextMaxQty.overrides ?? {})
+            .map(([k, v]) => `${k}=${v}`)
+            .join("\n")
+        );
         setAttrRules(Array.isArray(attrVal?.rules) ? attrVal!.rules : []);
         setAttrHeaders(headers);
         setAttrHeader(firstHeader);
@@ -186,6 +208,8 @@ export default function PricingPage() {
         if (!alive) return;
         setRules(defaultRules);
         setFixSetting(null);
+        setMaxQtySetting({ version: 1, defaultMax: 40, overrides: {} });
+        setMaxQtyOverridesText("");
         setAttrRules([]);
         setAttrHeaders([]);
         setAttrHeader("");
@@ -193,6 +217,7 @@ export default function PricingPage() {
         if (alive) {
           setLoading(false);
           setFixLoading(false);
+          setMaxQtyLoading(false);
           setAttrLoading(false);
         }
       }
@@ -279,6 +304,48 @@ export default function PricingPage() {
       setFixMsg(`❌ ${e?.message ?? "Import fehlgeschlagen"}`);
     } finally {
       setFixUploading(false);
+    }
+  }
+
+
+  function parseOverrides(text: string): Record<string, number> {
+    const out: Record<string, number> = {};
+    const lines = String(text ?? "")
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    for (const line of lines) {
+      const parts = line.split(/=|,|;|\t/).map((p) => p.trim()).filter(Boolean);
+      if (parts.length < 2) continue;
+      const art = parts[0];
+      const n = Math.floor(toNum(parts[1]));
+      if (!art) continue;
+      if (Number.isFinite(n) && n > 0) out[art] = n;
+    }
+    return out;
+  }
+
+  async function saveMaxQty() {
+    setMaxQtySaving(true);
+    setMaxQtyMsg("");
+    try {
+      const defaultMax = Math.max(1, Math.floor(toNum(maxQtySetting.defaultMax) || 40));
+      const overrides = parseOverrides(maxQtyOverridesText);
+
+      const payload: MaxQtySettings = { version: 1, defaultMax, overrides };
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key: "ordertool_max_qty_v1", value: payload }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.error ?? "Speichern fehlgeschlagen");
+      setMaxQtySetting(payload);
+      setMaxQtyMsg("✅ Maximalmengen gespeichert");
+    } catch (e: any) {
+      setMaxQtyMsg(`❌ ${e?.message ?? "Speichern fehlgeschlagen"}`);
+    } finally {
+      setMaxQtySaving(false);
     }
   }
 
@@ -585,6 +652,51 @@ export default function PricingPage() {
                 <div className="text-slate-600">Noch kein Fixpreis-Import vorhanden.</div>
               )}
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Max order quantity (Ordertool) */}
+        <Card>
+          <CardHeader className="flex items-center justify-between">
+            <div>
+              <div className="font-medium">Maximalmenge je Artikel (Ordertool)</div>
+              <div className="text-sm text-slate-600">
+                Standard ist 40. Pro Artikelnummer kannst du einen abweichenden Max-Wert setzen. Im Ordertool gilt immer: max = min(Verfügbar gesamt, konfigurierte Max).
+              </div>
+            </div>
+            <Badge>{maxQtyLoading ? "lädt…" : "bereit"}</Badge>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+              <div>
+                <label className="text-xs text-slate-500">Default-Max</label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={String(maxQtySetting.defaultMax ?? 40)}
+                  onChange={(e) =>
+                    setMaxQtySetting((p) => ({ ...p, defaultMax: Math.max(1, Math.floor(toNum(e.target.value))) }))
+                  }
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-xs text-slate-500">Overrides (eine Zeile pro Artikelnummer)</label>
+                <textarea
+                  className="w-full rounded-xl border px-3 py-2 text-sm min-h-[96px]"
+                  placeholder={"123456=25\n987654=10"}
+                  value={maxQtyOverridesText}
+                  onChange={(e) => setMaxQtyOverridesText(e.target.value)}
+                />
+                <div className="text-xs text-slate-500 mt-1">Format: ARTIKEL=MAX (MAX &gt; 0). Trennzeichen “=”, “,” oder “;” erlaubt.</div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 flex-wrap">
+              <Button onClick={saveMaxQty} disabled={maxQtySaving}>
+                {maxQtySaving ? "Speichert…" : "Speichern"}
+              </Button>
+            </div>
+            {maxQtyMsg ? <div className="rounded-xl border bg-neutral-50 p-3 text-sm">{maxQtyMsg}</div> : null}
           </CardContent>
         </Card>
 

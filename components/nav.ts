@@ -21,12 +21,10 @@ export const ADMIN_SUB_ITEMS: NavItem[] = [
   { key: "admin_geo", label: "Geodaten · Merge", href: "/admin/geo-merge", roles: ["admin", "superadmin"] },
   { key: "admin_geo_overview", label: "Geodaten · Übersicht", href: "/admin/geo-merge/overview", roles: ["admin", "superadmin"] },
   { key: "admin_buying", label: "Einkaufsverbände", href: "/admin/buying-groups", roles: ["admin", "superadmin"] },
-  { key: "admin_pricing", label: "Lagerverwaltung", href: "/admin/pricing", roles: ["admin", "superadmin"] },
+  { key: "admin_pricing_thresholds", label: "Schwellen · Preise", href: "/admin/pricing-thresholds", roles: ["admin", "superadmin"] },
+  { key: "admin_fixprice_articles", label: "Fixpreise · Artikel", href: "/admin/fixprice-articles", roles: ["admin", "superadmin"] },
   { key: "admin_backorders_import", label: "Auftragsrückstand · Import", href: "/admin/backorders-import", roles: ["admin", "superadmin"] },
-  // Cleanup ist eine eigene Seite (/cleanup). Die alte Admin-Route (/admin/cleanup) existiert nicht mehr.
-  { key: "admin_cleanup", label: "Cleanup", href: "/cleanup", roles: ["admin", "superadmin"] },
-  { key: "admin_territories", label: "Vertriebsgebiete", href: "/admin/territories", roles: ["admin", "superadmin"] },
-  { key: "admin_design", label: "Seitendesign", href: "/admin/design", roles: ["admin", "superadmin"] },
+  { key: "admin_cleanup", label: "Cleanup", href: "/admin/cleanup", roles: ["admin", "superadmin"] },
 ];
 
 export function isAllowed(role: UserRole, item: NavItem) {
