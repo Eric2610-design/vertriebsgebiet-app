@@ -527,7 +527,7 @@ export default function MapPage() {
           ${repNames ? `<div style="margin-top:4px;font-size:12px"><b>AD:</b> ${escapeHtml(repNames)}</div>` : ""}
           <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:10px">
             <a href="/dealer/${encodeURIComponent(d.id)}" style="color:#2563eb;text-decoration:underline">Details öffnen</a>
-            <a href="/dealer/${encodeURIComponent(d.id)}?openOrder=1" style="color:#0f172a;text-decoration:underline">Bestellung starten</a>
+            <a href="/ordertool?dealerId=${encodeURIComponent(d.id)}&dealerName=${encodeURIComponent(d.name ?? "")}" style="color:#0f172a;text-decoration:underline">Bestellung starten</a>
           </div>
         </div>
       `;

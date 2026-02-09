@@ -645,18 +645,12 @@ Hinweis: ${sameZipForce ? "FORCE aktiv (ignoriert Adresse/Land/PLZ-Checks)." : "
   const ordertoolMarket = d.country === "CH" ? "CH" : "DE";
 
   const openOrdertool = () => {
-    try {
-      localStorage.setItem("flyer_market", ordertoolMarket);
-      localStorage.setItem("FLYER_ORDERTOOL_PREFILL_V1", JSON.stringify({
-        dealerId: id,
-        dealerName: d.name,
-        customerNo: "",
-      }));
-      const url = ordertoolMarket === "CH" ? "/ordertool/template_ch.html" : "/ordertool/template_de_at.html";
-      window.open(url, "_blank", "noopener,noreferrer");
-    } catch {
-      alert("Ordertool konnte nicht geöffnet werden.");
-    }
+    const params = new URLSearchParams({
+      dealerId: id,
+      dealerName: d.name,
+      market: ordertoolMarket === "CH" ? "CH" : "DE_AT",
+    });
+    window.location.href = `/ordertool?${params.toString()}`;
   };
 
   return (

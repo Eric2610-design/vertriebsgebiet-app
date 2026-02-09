@@ -12,6 +12,9 @@ export default function OrdertoolSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [stockMsg, setStockMsg] = useState<string | null>(null);
+  const [stockUploading, setStockUploading] = useState(false);
+  const [lastStockUpdate, setLastStockUpdate] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -31,6 +34,10 @@ export default function OrdertoolSettingsPage() {
         else if (typeof maxVal === "string" && maxVal.trim()) setMaxQty(maxVal.trim());
         const freeVal = freeRow?.value;
         if (typeof freeVal === "string") setFreeStockColumn(freeVal);
+
+        const stockRes = await fetch("/api/ordertool/data?market=DE_AT", { cache: "no-store" });
+        const stockJson = await stockRes.json().catch(() => ({}));
+        if (alive && stockJson?.updatedAt) setLastStockUpdate(stockJson.updatedAt);
       } catch {
         // ignore
       } finally {
@@ -79,6 +86,24 @@ export default function OrdertoolSettingsPage() {
     }
   }
 
+  async function uploadStock(file: File) {
+    setStockUploading(true);
+    setStockMsg(null);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch("/api/ordertool/stock", { method: "POST", body });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error ?? "Upload fehlgeschlagen");
+      setLastStockUpdate(json?.updatedAt ?? null);
+      setStockMsg("Lagerbestand aktualisiert.");
+    } catch (e: any) {
+      setStockMsg(e?.message ?? "Upload fehlgeschlagen");
+    } finally {
+      setStockUploading(false);
+    }
+  }
+
   return (
     <RequireRole allow={["admin", "superadmin"]}>
       <div className="mx-auto max-w-4xl p-4 md:p-8 space-y-4">
@@ -122,6 +147,27 @@ export default function OrdertoolSettingsPage() {
             <div className="text-xs text-slate-500">
               Der Generator nutzt diese Spalte für den aktuell freien Bestand (leer lassen = automatische Erkennung).
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="text-sm font-semibold">Lagerbestandsdatei (aktuell)</CardHeader>
+          <CardContent className="space-y-2">
+            <div className="text-xs text-slate-500">
+              Zuletzt aktualisiert: {lastStockUpdate ? new Date(lastStockUpdate).toLocaleString() : "—"}
+            </div>
+            <input
+              type="file"
+              accept=".xlsx,.xls,.xlsm"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) uploadStock(f);
+              }}
+            />
+            {stockMsg ? <div className="text-xs text-slate-700">{stockMsg}</div> : null}
+            <Button disabled={stockUploading} onClick={save}>
+              {stockUploading ? "Lade…" : "Einstellungen speichern"}
+            </Button>
           </CardContent>
         </Card>
 

@@ -18,6 +18,9 @@ export default function FixpriceArticlesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [uploadMsg, setUploadMsg] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [sourceInfo, setSourceInfo] = useState<any | null>(null);
 
   // Laden aus app_settings
   useEffect(() => {
@@ -29,8 +32,10 @@ export default function FixpriceArticlesPage() {
 
         if (json?.value?.rows) {
           setRows(json.value.rows);
+          setSourceInfo(json.value.source ?? null);
         } else {
           setRows([]);
+          setSourceInfo(json.value?.source ?? null);
         }
       } catch {
         setRows([]);
@@ -98,6 +103,34 @@ export default function FixpriceArticlesPage() {
             >
               + Artikel
             </button>
+            <label className="rounded-xl border px-3 py-2 text-sm hover:bg-neutral-50 cursor-pointer">
+              {uploading ? "Lade…" : "Fixpreis-Datei hochladen"}
+              <input
+                type="file"
+                accept=".xlsx,.xls,.xlsm"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  setUploading(true);
+                  setUploadMsg(null);
+                  try {
+                    const form = new FormData();
+                    form.append("file", file);
+                    const res = await fetch("/api/fixprice/import", { method: "POST", body: form });
+                    const json = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(json?.error ?? "Upload fehlgeschlagen");
+                    setRows(json?.setting?.value?.rows ?? rows);
+                    setSourceInfo(json?.setting?.value?.source ?? null);
+                    setUploadMsg("Fixpreis-Datei importiert.");
+                  } catch (err: any) {
+                    setUploadMsg(err?.message ?? "Upload fehlgeschlagen");
+                  } finally {
+                    setUploading(false);
+                  }
+                }}
+              />
+            </label>
             <button
               onClick={save}
               disabled={saving}
@@ -110,6 +143,14 @@ export default function FixpriceArticlesPage() {
 
         {msg && (
           <div className="rounded-xl border bg-neutral-50 p-3 text-sm">{msg}</div>
+        )}
+        {uploadMsg && (
+          <div className="rounded-xl border bg-neutral-50 p-3 text-sm">{uploadMsg}</div>
+        )}
+        {sourceInfo && (
+          <div className="text-xs text-neutral-500">
+            Quelle: {sourceInfo.filename ?? "—"} · Sheet: {sourceInfo.sheet ?? "—"} · Import: {sourceInfo.imported_at ?? "—"}
+          </div>
         )}
 
         {loading ? (
