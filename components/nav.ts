@@ -21,6 +21,7 @@ export const ADMIN_SUB_ITEMS: NavItem[] = [
   { key: "admin_geo_overview", label: "Geodaten · Übersicht", href: "/admin/geo-merge/overview", roles: ["admin", "superadmin"] },
   { key: "admin_buying", label: "Einkaufsverbände", href: "/admin/buying-groups", roles: ["admin", "superadmin"] },
   { key: "admin_pricing", label: "Lagerverwaltung", href: "/admin/pricing", roles: ["admin", "superadmin"] },
+  { key: "admin_ordertool_rules", label: "Ordertool · Regeln", href: "/admin/ordertool-rules", roles: ["admin", "superadmin"] },
   // Cleanup ist eine eigene Seite (/cleanup). Die alte Admin-Route (/admin/cleanup) existiert nicht mehr.
   { key: "admin_cleanup", label: "Cleanup", href: "/cleanup", roles: ["admin", "superadmin"] },
   { key: "admin_territories", label: "Vertriebsgebiete", href: "/admin/territories", roles: ["admin", "superadmin"] },

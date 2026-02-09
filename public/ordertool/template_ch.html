@@ -341,8 +341,7 @@
       </div>
       <div class="cartMetrics">
         <div class="mrow"><span id="lblCartTotal">Gesamt</span><strong id="cartCount">0</strong></div>
-        <div class="mrow"><span>Bosch Fixpreis</span><strong id="cartBoschFix">0</strong></div>
-        <div class="mrow"><span>Panasonic Fixpreis</span><strong id="cartPanaFix">0</strong></div>
+        <div id="cartRuleTotals"></div>
         <div class="mrow"><span id="lblCartValue">Wert (EK)</span><strong id="cartValue">0</strong></div>
       </div>
       <div class="cartDivider"></div>
@@ -406,7 +405,10 @@ const REGION = MARKET;
 let CURR = (MARKET === 'CH') ? 'CHF' : '€';
 let LANG = (localStorage.getItem('flyer_lang') || 'de');
 if (MARKET === 'DE') LANG = 'de';
-const TILES = (MARKET === 'CH') ? TILES_CH : TILES_DE;
+let TILES = (MARKET === 'CH') ? TILES_CH : TILES_DE;
+let RULES = [];
+let RULES_VERSION = 0;
+let RULES_UPDATED_AT = '';
 window.__MARKET = MARKET;
 function getLocale(){
   if (MARKET === 'DE') return 'de-DE';
@@ -502,11 +504,7 @@ function applyLang(){
   setText('lblCartTitle','cartTitle');
   setText('lblCartSub','cartSub');
   setText('lblCartTotal','cart_total');
-  setText('lblCartBoschFix','cart_bosch_fix');
-  setText('lblCartPanaFix','cart_pana_fix');
   setText('lblCartValue','cart_value');
-  setText('lblCartBoschKalk','cart_bosch_kalk');
-  setText('lblCartPanaKalk','cart_pana_kalk');
   setText('lblFootHint','footHint');
 
   const dn=document.getElementById('dealerName'); if(dn) dn.placeholder=t('dealerPh');
@@ -1019,7 +1017,7 @@ function exportOrder() {
   const dealer=document.getElementById('dealerName').value.trim();
   const qtyInputs = cartInputs();
   const tileById = new Map((Array.isArray(TILES)?TILES:[]).map(t=>[String(t.id), t]));
-  const totalsByGroup = computeGroupTotals();
+  const totalsByRule = computeRuleTotals();
 
   // EK, der tatsächlich greift: Stammdaten/Fallback-EK, bei Schwelle ggf. UVP/kalk,
   // niemals höher als Basis-EK (Deckelung). Wenn Basis-EK leer und keine Schwelle greift => 0.
@@ -1028,20 +1026,17 @@ function exportOrder() {
     let ekEff = ekBase>0 ? ekBase : 0;
 
     const t = tileById.get(String(el.dataset.tile||'')) || null;
-    if (t) {
-      const g = groupKeyForTile(t);
-      if (g){
-        const key = norm(g.hersteller)+'||'+norm(g.preisart);
-        const groupTotal = totalsByGroup.get(key) || 0;
-        const best = bestKalk(g.hersteller, g.preisart, groupTotal);
-        if (best && best.k) {
-          const uvp = euroToNumber(el.dataset.uvp || t.uvp);
-          if (uvp>0) {
-            const dyn = uvp / best.k;
-            if (dyn>0) {
-              if (ekEff>0) ekEff = Math.min(ekEff, dyn);
-              else ekEff = dyn;
-            }
+    const match = findRuleMatch(el.dataset || {}, t);
+    if (t && match) {
+      const ruleTotal = totalsByRule.get(match.index) || 0;
+      const best = bestThreshold(match.rule.thresholds, ruleTotal);
+      if (best && best.k) {
+        const uvp = euroToNumber(el.dataset.uvp || t.uvp);
+        if (uvp>0) {
+          const dyn = uvp / best.k;
+          if (dyn>0) {
+            if (ekEff>0) ekEff = Math.min(ekEff, dyn);
+            else ekEff = dyn;
           }
         }
       }
@@ -1149,45 +1144,57 @@ function ekRangeFromTile(t){
   if ((mn>0)||(mx>0)) return {mn:mn||mx, mx:mx||mn};
   return {mn:0,mx:0};
 }
-function groupKeyForTile(t){
-  const maker = norm(t.motor||'');
-  if (maker.includes('panasonic')) return {hersteller:'Panasonic', preisart:'alle'};
-  if (maker.includes('bosch') && t.preisart==='ja') return {hersteller:'Bosch', preisart:'Fixpreis'};
-  if (maker.includes('bosch') && t.preisart==='sonder') return {hersteller:'Bosch', preisart:'Sondermodell'};
-  return null;
+function ruleLabel(rule){
+  const attr = String(rule?.attribute || '').trim();
+  const value = String(rule?.value || '').trim();
+  if (rule?.label) return String(rule.label);
+  if (attr && value) return `${attr} = ${value}`;
+  return attr || 'Regel';
 }
-function bestKalk(hersteller, preisart, totalQty){
-  const H = norm(hersteller);
-  const P = norm(preisart);
-  const rows = (Array.isArray(SCHWELLEN)?SCHWELLEN:[])
-    .map(r=>({
-      h:norm(r.Hersteller||r.hersteller||''),
-      p:norm(r.Preisart||r.preisart||''),
-      min:Number(r.Mindestmenge||r.mindestmenge||r.minQty||r.menge||0),
-      k:Number(r.Kalkulation||r.kalkulation||r.kalk||0)
+function ruleMatches(rule, dataset, tile){
+  if (!rule) return false;
+  const attr = String(rule.attribute || '').trim();
+  const value = norm(rule.value || '');
+  if (!attr || !value) return false;
+
+  const readDataset = (key)=>{
+    if (!dataset) return '';
+    if (dataset[key] != null) return String(dataset[key] || '');
+    return '';
+  };
+
+  if (attr === 'motor') return norm(readDataset('motor') || tile?.motor || '') === value;
+  if (attr === 'status') return norm(readDataset('status')) === value;
+  if (attr === 'preisart') return norm(readDataset('preisart') || tile?.preisart || '') === value;
+  if (attr === 'battery_tags') {
+    const batteryLabel = norm(readDataset('battery'));
+    if (batteryLabel && batteryLabel === value) return true;
+    const tags = Array.isArray(tile?.battery_tags) ? tile.battery_tags : [];
+    return tags.some(tag => norm(tag) === value);
+  }
+
+  return norm(readDataset(attr) || tile?.[attr] || '') === value;
+}
+function bestThreshold(thresholds, totalQty){
+  const rows = (Array.isArray(thresholds) ? thresholds : [])
+    .map(t => ({
+      min: Number(t.minQty ?? t.mindestmenge ?? t.min ?? 0),
+      k: Number(t.kalkulation ?? t.kalk ?? t.Kalkulation ?? 0),
     }))
-    .filter(r=>r.h && r.p && r.min>0 && r.k>0 && r.h===H && r.p===P)
-    .sort((a,b)=>a.min-b.min);
-  let best=null;
-  for (const r of rows) if (totalQty>=r.min) best=r;
-  return best; // {min,k} or null
+    .filter(t => Number.isFinite(t.min) && t.min > 0 && Number.isFinite(t.k) && t.k > 0)
+    .sort((a, b) => a.min - b.min);
+  let best = null;
+  for (const r of rows) if (totalQty >= r.min) best = r;
+  return best;
 }
 
-// v37: render Schwellenübersicht im Händler-Kasten (aus SCHWELLEN)
+// v37: render Schwellenübersicht im Händler-Kasten (aus RULES)
 function renderSchwellenOverview(){
   const host = document.getElementById('schwOverview');
   if(!host) return;
 
-  const raw = Array.isArray(SCHWELLEN) ? SCHWELLEN : [];
-  const rows = raw.map(r=>{
-    const H = String(r.Hersteller ?? r.hersteller ?? '').trim();
-    const P = String(r.Preisart ?? r.preisart ?? '').trim();
-    const min = Number(r.Mindestmenge ?? r.mindestmenge ?? r.minQty ?? r.menge ?? 0);
-    const k = Number(r.Kalkulation ?? r.kalkulation ?? r.kalk ?? 0);
-    return {H, P, h:(H||'').toLowerCase(), p:(P||'').toLowerCase(), min, k};
-  }).filter(x=>x.H && x.P && Number.isFinite(x.min) && x.min>0 && Number.isFinite(x.k) && x.k>0);
-
-  if(!rows.length){ host.textContent = '—'; return; }
+  const raw = Array.isArray(RULES) ? RULES : [];
+  if(!raw.length){ host.textContent = '—'; return; }
 
   const fmtMin = (v)=>{
     try{ return Number(v).toLocaleString('de-CH',{maximumFractionDigits:0}); }catch(e){ return String(v); }
@@ -1196,32 +1203,24 @@ function renderSchwellenOverview(){
     try{ return Number(v).toLocaleString('de-CH',{minimumFractionDigits:1, maximumFractionDigits:1}); }catch(e){ return String(v); }
   };
 
-  const groups = new Map();
-  for(const r of rows){
-    const key = r.h + '|' + r.p;
-    if(!groups.has(key)) groups.set(key, {H:r.H, P:r.P, h:r.h, p:r.p, items:[]});
-    groups.get(key).items.push(r);
-  }
-
-  const arr = Array.from(groups.values())
-    .map(g=>{ g.items.sort((a,b)=>a.min-b.min); return g; })
-    .sort((a,b)=>{
-      const ha = a.h.localeCompare(b.h,'de');
-      if(ha!==0) return ha;
-      return a.p.localeCompare(b.p,'de');
-    });
-
   host.innerHTML = '';
-  for(const g of arr){
+  for(const rule of raw){
     const line = document.createElement('div');
     line.className = 'schwLine';
 
     const strong = document.createElement('b');
-    strong.textContent = `${g.H} ${g.P}`;
+    strong.textContent = ruleLabel(rule);
     line.appendChild(strong);
 
-    const pieces = g.items.map(it => `${fmtMin(it.min)}→${fmtK(it.k)}`);
-    line.appendChild(document.createTextNode(': ' + pieces.join(' · ')));
+    const pieces = (Array.isArray(rule.thresholds) ? rule.thresholds : [])
+      .map(it => ({
+        min: Number(it.minQty ?? it.mindestmenge ?? it.min ?? 0),
+        k: Number(it.kalkulation ?? it.kalk ?? it.Kalkulation ?? 0),
+      }))
+      .filter(it => Number.isFinite(it.min) && it.min > 0 && Number.isFinite(it.k) && it.k > 0)
+      .sort((a,b)=>a.min-b.min)
+      .map(it => `${fmtMin(it.min)}→${fmtK(it.k)}`);
+    line.appendChild(document.createTextNode(pieces.length ? ': ' + pieces.join(' · ') : ': —'));
 
     host.appendChild(line);
   }
@@ -1261,25 +1260,7 @@ function ekTextForTile(t, dyn){
   return {text: dynText, title};
 }
 function updateEkChips(){
-  // totals per group from current order inputs
-  const totals = new Map(); // key: h||p -> total
-  const qtyInputs = cartInputs();
-  for (const el of qtyInputs){
-    const v=Number(el.value||0);
-    if(!Number.isFinite(v) || v<=0) continue;
-    const mx=Number(el.dataset.max||0);
-    const q=Math.min(v,mx);
-    if(q<=0) continue;
-    const maker = norm(el.dataset.motor||'');
-    const preis = String(el.dataset.preisart||'').trim();
-    let key=null;
-    if (maker.includes('panasonic')) key = 'panasonic||alle';
-    else if (maker.includes('bosch') && preis==='ja') key = 'bosch||fixpreis';
-    else if (maker.includes('bosch') && preis==='sonder') key = 'bosch||sondermodell';
-    if (!key) continue;
-    totals.set(key, (totals.get(key)||0) + q);
-  }
-
+  const totalsByRule = computeRuleTotals();
   const byId = new Map();
   for (const t of TILES) byId.set(String(t.id), t);
 
@@ -1287,12 +1268,11 @@ function updateEkChips(){
     const t = byId.get(String(chip.dataset.tile||''));
     if(!t) continue;
 
-    const g = groupKeyForTile(t);
+    const match = findRuleMatch({ motor: t.motor, preisart: t.preisart, battery: batteryLabel(t) }, t);
     let dyn=null;
-    if (g){
-      const key = norm(g.hersteller)+'||'+norm(g.preisart);
-      const total = totals.get(key) || 0;
-      const best = bestKalk(g.hersteller, g.preisart, total);
+    if (match){
+      const total = totalsByRule.get(match.index) || 0;
+      const best = bestThreshold(match.rule.thresholds, total);
       if (best && best.k) {
         const uvp = euroToNumber(t.uvp);
         if (uvp>0) {
@@ -1339,8 +1319,17 @@ function cartInputs(){
   return arr;
 }
 
-function computeGroupTotals(){
-  const totals = new Map(); // key: h||p -> total
+function findRuleMatch(dataset, tile){
+  const list = Array.isArray(RULES) ? RULES : [];
+  for (let i = 0; i < list.length; i += 1) {
+    const rule = list[i];
+    if (ruleMatches(rule, dataset, tile)) return { rule, index: i };
+  }
+  return null;
+}
+function computeRuleTotals(){
+  const totals = new Map();
+  const tileById = new Map((Array.isArray(TILES)?TILES:[]).map(t=>[String(t.id), t]));
   const qtyInputs = cartInputs();
   for (const el of qtyInputs){
     const v=Number(el.value||0);
@@ -1348,22 +1337,19 @@ function computeGroupTotals(){
     const mx=Number(el.dataset.max||0);
     const q=Math.min(v,mx);
     if(q<=0) continue;
-    const maker = norm(el.dataset.motor||'');
-    const preis = String(el.dataset.preisart||'').trim();
-    let key=null;
-    if (maker.includes('panasonic')) key = 'panasonic||alle';
-    else if (maker.includes('bosch') && preis==='ja') key = 'bosch||fixpreis';
-    else if (maker.includes('bosch') && preis==='sonder') key = 'bosch||sondermodell';
-    if (key) totals.set(key, (totals.get(key)||0) + q);
+    const t = tileById.get(String(el.dataset.tile||'')) || null;
+    const match = findRuleMatch(el.dataset || {}, t);
+    if (!match) continue;
+    totals.set(match.index, (totals.get(match.index)||0) + q);
   }
   return totals;
 }
 
 function computeCartSummary(){
   const tileById = new Map((Array.isArray(TILES)?TILES:[]).map(t=>[String(t.id), t]));
-  const totalsByGroup = computeGroupTotals();
+  const totalsByRule = computeRuleTotals();
 
-  let total=0, panasonic=0, boschFix=0, sonder=0, normal=0;
+  let total=0;
   let value=0;
 
   const qtyInputs = cartInputs();
@@ -1376,33 +1362,22 @@ function computeCartSummary(){
 
     total += q;
 
-    const maker = norm(el.dataset.motor||'');
-    const preis = String(el.dataset.preisart||'').trim();
-
-    if (maker.includes('panasonic')) panasonic += q;
-    if (maker.includes('bosch') && preis==='ja') boschFix += q;
-    if (preis==='sonder') sonder += q;
-    if (!maker.includes('panasonic') && !(maker.includes('bosch') && preis==='ja') && preis!=='sonder') normal += q;
-
     // Effective EK per Position: default Stammdaten-EK, if Schwelle greift => UVP/kalk,
     // aber niemals höher als Stammdaten-EK (Deckelung).
     const ekBase = euroToNumber(el.dataset.ekbase||0);
     let ekEff = ekBase>0 ? ekBase : 0;
 
     const t = tileById.get(String(el.dataset.tile||'')) || null;
-    if (t) {
-      const g = groupKeyForTile(t);
-      if (g){
-        const key = norm(g.hersteller)+'||'+norm(g.preisart);
-        const groupTotal = totalsByGroup.get(key) || 0;
-        const best = bestKalk(g.hersteller, g.preisart, groupTotal);
-        if (best && best.k) {
-          const uvp = euroToNumber(el.dataset.uvp || t.uvp);
-          if (uvp>0) {
-            const dyn = uvp / best.k;
-            if (ekBase>0 && dyn>ekBase) ekEff = ekBase;
-            else ekEff = dyn;
-          }
+    const match = findRuleMatch(el.dataset || {}, t);
+    if (t && match) {
+      const totalForRule = totalsByRule.get(match.index) || 0;
+      const best = bestThreshold(match.rule.thresholds, totalForRule);
+      if (best && best.k) {
+        const uvp = euroToNumber(el.dataset.uvp || t.uvp);
+        if (uvp>0) {
+          const dyn = uvp / best.k;
+          if (ekBase>0 && dyn>ekBase) ekEff = ekBase;
+          else ekEff = dyn;
         }
       }
     }
@@ -1410,15 +1385,18 @@ function computeCartSummary(){
     value += q * (Number.isFinite(ekEff) ? ekEff : 0);
   }
 
-  const boschQty = totalsByGroup.get('bosch||fixpreis') || 0;
-  const panaQty = totalsByGroup.get('panasonic||alle') || 0;
-  const boschBest = bestKalk('Bosch','Fixpreis', boschQty);
-  const panaBest = bestKalk('Panasonic','alle', panaQty);
-  const boschK = boschBest && boschBest.k ? boschBest.k : 0;
-  const boschMin = boschBest && boschBest.min ? boschBest.min : 0;
-  const panaK = panaBest && panaBest.k ? panaBest.k : 0;
-  const panaMin = panaBest && panaBest.min ? panaBest.min : 0;
-  return {total, panasonic, boschFix, normal, sonder, value, boschK, boschMin, panaK, panaMin};
+  const ruleTotals = (Array.isArray(RULES) ? RULES : []).map((rule, index) => {
+    const totalQty = totalsByRule.get(index) || 0;
+    const best = bestThreshold(rule.thresholds, totalQty);
+    return {
+      label: ruleLabel(rule),
+      total: totalQty,
+      kalk: best?.k || 0,
+      min: best?.min || 0,
+    };
+  });
+
+  return {total, value, ruleTotals};
 }
 
 function fmtKalk(k, min){
@@ -1430,29 +1408,64 @@ function fmtKalk(k, min){
 function updateCartUI(){
   const c = computeCartSummary();
   const boxCount = document.getElementById('cartCount');
-  const boxBosch = document.getElementById('cartBoschFix');
-  const boxPana = document.getElementById('cartPanaFix');
   const boxValue = document.getElementById('cartValue');
-  const boxBoschK = document.getElementById('cartBoschKalk');
-  const boxPanaK = document.getElementById('cartPanaKalk');
+  const boxRules = document.getElementById('cartRuleTotals');
 
   if (boxCount) boxCount.textContent = String(c.total||0);
-  if (boxBosch) boxBosch.textContent = String(c.boschFix||0);
-  if (boxPana) boxPana.textContent = String(c.panasonic||0);
   if (boxValue) boxValue.textContent = `${euroFmt(c.value)} ${CURR}`;
 
-  if (boxBoschK) boxBoschK.textContent = fmtKalk(c.boschK, c.boschMin);
-  if (boxPanaK) boxPanaK.textContent = fmtKalk(c.panaK, c.panaMin);
+  if (boxRules) {
+    boxRules.innerHTML = '';
+    const rows = (c.ruleTotals || []).filter(r => r.total > 0);
+    if (!rows.length) {
+      const empty = document.createElement('div');
+      empty.className = 'mrow';
+      empty.innerHTML = '<span>Keine Regel aktiv</span><strong>0</strong>';
+      boxRules.appendChild(empty);
+    } else {
+      for (const row of rows) {
+        const el = document.createElement('div');
+        el.className = 'mrow';
+        const kalkText = row.kalk ? ` · ${fmtKalk(row.kalk, row.min)}` : '';
+        el.innerHTML = `<span>${row.label}${kalkText}</span><strong>${row.total}</strong>`;
+        boxRules.appendChild(el);
+      }
+    }
+  }
 
   const chip = document.getElementById('cartValueChip');
   if (chip) chip.textContent = `Warenkorb: ${euroFmt(c.value)} ${CURR}`;
   window.__CART = c;
 }
 
+async function loadOrdertoolData(){
+  const fallback = (MARKET === 'CH') ? TILES_CH : TILES_DE;
+  try{
+    const res = await fetch(`/api/ordertool/data?market=${encodeURIComponent(MARKET)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data?.tiles) && data.tiles.length) {
+      TILES = data.tiles;
+    } else {
+      TILES = fallback;
+    }
+    window.TILES = TILES;
+    if (Array.isArray(data?.rules)) {
+      RULES = data.rules;
+    } else {
+      RULES = [];
+    }
+    RULES_VERSION = Number(data?.rulesVersion || 0) || 0;
+    RULES_UPDATED_AT = String(data?.rulesUpdatedAt || data?.tilesUpdatedAt || '');
+    window.RULES = RULES;
+    window.RULES_VERSION = RULES_VERSION;
+  }catch(e){
+    TILES = fallback;
+    window.TILES = TILES;
+  }
+}
 
-
-
-function init() {
+async function init() {
   // Expiry check
   if (isExpired()) {
     const loc = (MARKET === 'CH') ? (LANG || 'de') : 'de';
@@ -1484,6 +1497,8 @@ render(); updateCartUI(); }); }
   }
   applyLang();
 
+  await loadOrdertoolData();
+
   // ensure tiles have preisart and battery_tags
   for (const t of TILES) {
     if (!t.preisart) {
@@ -1495,6 +1510,16 @@ render(); updateCartUI(); }); }
     }
     if (!Array.isArray(t.battery_tags)) t.battery_tags=[];
   }
+  if (RULES_VERSION) {
+    const stamp = document.getElementById('stamp');
+    if (stamp) {
+      const suffix = RULES_UPDATED_AT
+        ? ` · Regeln v${RULES_VERSION} (${RULES_UPDATED_AT})`
+        : ` · Regeln v${RULES_VERSION}`;
+      stamp.textContent = String(stamp.textContent || '') + suffix;
+    }
+  }
+  renderSchwellenOverview();
   const listenIds=['q','family','motor','motor_type','frame','framesize','color','battery','preisart','status'];
   for (const id of listenIds) {
     const el=document.getElementById(id);
@@ -1542,7 +1567,7 @@ function openCartOverviewWindow(){
   const qtyInputs = cartInputs();
   if(!qtyInputs.length){ showToast('Keine Mengen im Warenkorb.'); return; }
 
-  const totalsByGroup = computeGroupTotals();
+  const totalsByRule = computeRuleTotals();
   const tileById = new Map((Array.isArray(TILES)?TILES:[]).map(t=>[String(t.id), t]));
 
   const sizeRank = (s)=>{
@@ -1564,15 +1589,10 @@ function openCartOverviewWindow(){
     const ekBase = euroToNumber(el.dataset.ekbase||0);
     let ekEff = ekBase>0 ? ekBase : 0;
     const t = tileById.get(String(el.dataset.tile||'')) || null;
-    if (t) {
-      const maker = norm(el.dataset.motor||t.motor||'');
-      const preis = String(el.dataset.preisart||t.preisart||'').trim();
-      let hersteller='', preisart='', key=null;
-      if (maker.includes('panasonic')) { hersteller='Panasonic'; preisart='alle'; key='panasonic||alle'; }
-      else if (maker.includes('bosch') && preis==='ja') { hersteller='Bosch'; preisart='Fixpreis'; key='bosch||fixpreis'; }
-      else if (maker.includes('bosch') && preis==='sonder') { hersteller='Bosch'; preisart='Sondermodell'; key='bosch||sondermodell'; }
-      const groupTotal = key ? (totalsByGroup.get(key)||0) : 0;
-      const best = (key) ? bestKalk(hersteller, preisart, groupTotal) : null;
+    const match = findRuleMatch(el.dataset || {}, t);
+    if (t && match) {
+      const ruleTotal = totalsByRule.get(match.index) || 0;
+      const best = bestThreshold(match.rule.thresholds, ruleTotal);
       if (best && best.k) {
         const uvp = euroToNumber(el.dataset.uvp || t.uvp);
         if (uvp>0) {
@@ -2137,45 +2157,31 @@ document.addEventListener('DOMContentLoaded', init);
     // Replace functions that were DOM-only so totals/export keep working even when filter hides items.
     const norm = (s)=>String(s||"").toLowerCase().trim();
 
-    window.computeGroupTotals = function(){
+    window.computeRuleTotals = function(){
       const totals = new Map();
+      const tileById = new Map((Array.isArray(window.TILES)?window.TILES:[]).map(t=>[String(t.id), t]));
+      const rules = Array.isArray(window.RULES) ? window.RULES : [];
       for (const entry of Object.values(state.cart)){
         if(!entry || !(entry.q>0)) continue;
         const meta = entry.meta || {};
-        const maker = norm(meta.motor||"");
-        const preis = String(meta.preisart||"").trim();
-        let key=null;
-        if (maker.includes("panasonic")) key = "panasonic||alle";
-        else if (maker.includes("bosch") && preis==="ja") key = "bosch||fixpreis";
-        else if (maker.includes("bosch") && preis==="sonder") key = "bosch||sondermodell";
-        if (key) totals.set(key, (totals.get(key)||0) + entry.q);
+        const t = tileById.get(String(meta.tile||'')) || null;
+        for (let i = 0; i < rules.length; i += 1) {
+          if (typeof window.ruleMatches === "function" && window.ruleMatches(rules[i], meta, t)) {
+            totals.set(i, (totals.get(i)||0) + entry.q);
+            break;
+          }
+        }
       }
       return totals;
     };
 
     window.computeCartSummary = function(){
-      const totalsByGroup = (typeof window.computeGroupTotals==="function") ? window.computeGroupTotals() : new Map();
-      let total=0, panasonic=0, boschFix=0, sonder=0, normal=0;
+      const totalsByRule = (typeof window.computeRuleTotals==="function") ? window.computeRuleTotals() : new Map();
+      let total=0;
       let value=0;
 
-      // best kalk thresholds are computed elsewhere in your file, we reuse those helpers if present
       const tileById = new Map((Array.isArray(window.TILES)?window.TILES:[]).map(t=>[String(t.id), t]));
-      const getBest = (maker, preis)=> {
-        try{
-          if(typeof window.bestThresholdForKey==="function"){
-            return window.bestThresholdForKey(maker, preis, totalsByGroup);
-          }
-        }catch(_){}
-        return null;
-      };
-
-      const boschBest = getBest("bosch","fixpreis");
-      const panaBest  = getBest("panasonic","alle");
-
-      const boschK = boschBest && boschBest.k ? boschBest.k : 0;
-      const boschMin = boschBest && boschBest.min ? boschBest.min : 0;
-      const panaK = panaBest && panaBest.k ? panaBest.k : 0;
-      const panaMin = panaBest && panaBest.min ? panaBest.min : 0;
+      const rules = Array.isArray(window.RULES) ? window.RULES : [];
 
       for (const [art, entry] of Object.entries(state.cart)){
         if(!entry || !(entry.q>0)) continue;
@@ -2184,38 +2190,44 @@ document.addEventListener('DOMContentLoaded', init);
 
         total += q;
 
-        const maker = norm(meta.motor||"");
-        const preis = String(meta.preisart||"").trim();
-
-        if (maker.includes("panasonic")) panasonic += q;
-        if (maker.includes("bosch") && preis==="ja") boschFix += q;
-        if (preis==="sonder") sonder += q;
-        if (!maker.includes("panasonic") && !(maker.includes("bosch") && preis==="ja") && preis!=="sonder") normal += q;
-
-        // EK value: prefer existing helpers if present; fallback to base EK from dataset
         let uvp = Number(String(meta.uvp||"0").replace(/\./g,"").replace(",", ".")) || 0;
         let ekBase = Number(String(meta.ekbase||"0").replace(/\./g,"").replace(",", ".")) || 0;
 
         let ekEff = ekBase;
-        try{
-          if(typeof window.calcEffectiveEk==="function"){
-            // custom helper might exist in your file
-            ekEff = window.calcEffectiveEk({maker, preis, uvp, ekBase, totalsByGroup});
-          } else {
-            // simple threshold rule: if fixpreis & maker -> use uvp/kalk, but never higher than ekBase
-            let k = 0;
-            if(maker.includes("bosch") && preis==="ja" && boschK) k = boschK;
-            if(maker.includes("panasonic") && panaK) k = panaK;
-            if(k>0 && uvp>0){
-              const calc = uvp / k;
-              if(Number.isFinite(calc) && calc>0) ekEff = Math.min(ekBase>0?ekBase:calc, calc);
+        const t = tileById.get(String(meta.tile||'')) || null;
+        if (t && typeof window.ruleMatches === "function" && typeof window.bestThreshold === "function") {
+          let matchedRule = null;
+          let matchedIndex = -1;
+          for (let i = 0; i < rules.length; i += 1) {
+            if (window.ruleMatches(rules[i], meta, t)) { matchedRule = rules[i]; matchedIndex = i; break; }
+          }
+          if (matchedRule) {
+            const totalForRule = totalsByRule.get(matchedIndex) || 0;
+            const best = window.bestThreshold(matchedRule.thresholds, totalForRule);
+            if (best && best.k && uvp>0) {
+              const calc = uvp / best.k;
+              if (Number.isFinite(calc) && calc>0) ekEff = ekBase>0 ? Math.min(ekBase, calc) : calc;
             }
           }
-        }catch(_){}
+        }
+
         if(Number.isFinite(ekEff) && ekEff>0) value += ekEff * q;
       }
 
-      return {total, panasonic, boschFix, normal, sonder, value, boschK, boschMin, panaK, panaMin};
+      const ruleTotals = rules.map((rule, index) => {
+        const totalQty = totalsByRule.get(index) || 0;
+        const best = (typeof window.bestThreshold === "function")
+          ? window.bestThreshold(rule.thresholds, totalQty)
+          : null;
+        return {
+          label: (typeof window.ruleLabel === "function") ? window.ruleLabel(rule) : String(rule.label || rule.attribute || 'Regel'),
+          total: totalQty,
+          kalk: best?.k || 0,
+          min: best?.min || 0,
+        };
+      });
+
+      return {total, value, ruleTotals};
     };
 
     // export uses cart store, so it works even if filtered
@@ -2224,7 +2236,7 @@ document.addEventListener('DOMContentLoaded', init);
     const dealer = (document.getElementById("dealerName")?.value || "").trim();
     const customer = (document.getElementById("customerNo")?.value || "").trim();
 
-    const totalsByGroup = (typeof computeGroupTotals==="function") ? computeGroupTotals() : new Map();
+    const totalsByRule = (typeof computeRuleTotals==="function") ? computeRuleTotals() : new Map();
 
     const csvNum = (n)=>{
       const v = Number(n);
@@ -2243,17 +2255,16 @@ document.addEventListener('DOMContentLoaded', init);
       const mx = Number(el.dataset.max||0);
       const qty = Math.min(q0, (Number.isFinite(mx)&&mx>0)?mx:q0);
 
-      const motor = String(el.dataset.motor||"");
-      const preisRaw = String(el.dataset.preisart||"").trim();
-      const maker = norm(motor);
-
-      let groupKey=null, hersteller="", preisart="";
-      if (maker.includes("panasonic")) { groupKey="panasonic||alle"; hersteller="Panasonic"; preisart="alle"; }
-      else if (maker.includes("bosch") && preisRaw==="ja") { groupKey="bosch||fixpreis"; hersteller="Bosch"; preisart="Fixpreis"; }
-      else if (maker.includes("bosch") && preisRaw==="sonder") { groupKey="bosch||sondermodell"; hersteller="Bosch"; preisart="Sondermodell"; }
-
-      const groupTotal = groupKey ? (totalsByGroup.get(groupKey)||0) : 0;
-      const best = (groupKey && typeof bestKalk==="function") ? bestKalk(hersteller, preisart, groupTotal) : null;
+      const t = (typeof TILES!=="undefined" && Array.isArray(TILES))
+        ? TILES.find(x=>String(x.id)===String(el.dataset.tile||'')) : null;
+      let best = null;
+      if (t && typeof findRuleMatch==="function") {
+        const match = findRuleMatch(el.dataset || {}, t);
+        if (match) {
+          const totalForRule = totalsByRule.get(match.index) || 0;
+          best = bestThreshold(match.rule.thresholds, totalForRule);
+        }
+      }
 
       const uvp = euroToNumber(el.dataset.uvp || "0");
       const ekBase = euroToNumber(el.dataset.ekbase || "0");
