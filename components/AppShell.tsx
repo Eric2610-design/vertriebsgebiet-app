@@ -255,7 +255,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <div className="md:pl-64">
         <div className="sticky top-0 z-30 border-b border-black bg-black px-4 py-3 text-white">
           <div className="flex items-center gap-3">
-            <img src="/brands/flyer.png" alt="FLYER" className="h-8 w-8 object-contain" />
             <div className="text-sm font-semibold">FLYER Vertriebs-App</div>
           </div>
         </div>
