@@ -1,11 +1,9 @@
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
-import { getDealerScope, dealerInTerritory } from "@/app/api/_dealerScope";
 
 export async function GET() {
   try {
     const supabase = supabaseService();
-    const scope = await getDealerScope();
 
     const step = 1000;
     let from = 0;
@@ -13,12 +11,8 @@ export async function GET() {
 
     while (true) {
       let q = supabase
-        .from("dealers")
-        .select(`
-          id,name,street,zip,city,country,phone,email,website,opening_hours,lat,lng,geocode_status,notes,created_at,updated_at,
-          buying_group_key,
-          dealer_manufacturers!left(manufacturer_key)
-        `)
+        .from("v_dealers_map")
+        .select(`id,name,street,zip,city,country_iso,phone,email,website,opening_hours,lat,lng,geocode_status,notes,created_at,updated_at,buying_group_key,sources,source_count`)
         .order("name", { ascending: true })
         .range(from, from + step - 1);
 
@@ -30,7 +24,7 @@ export async function GET() {
 
       if (error && /column .*status/i.test(error.message)) {
         const retry = await supabase
-          .from("dealers")
+          .from("v_dealers_map")
           .select(`
             id,name,street,zip,city,country,phone,email,website,opening_hours,lat,lng,geocode_status,notes,created_at,updated_at,
             buying_group_key,
@@ -56,17 +50,28 @@ export async function GET() {
       from += step;
     }
 
-    let items = all.map((d: any) => {
-      const manufacturer_keys = (d.dealer_manufacturers ?? []).map((x: any) => x.manufacturer_key);
-      const has_flyer = manufacturer_keys.includes("flyer");
-      delete d.dealer_manufacturers;
-      return { ...d, has_flyer, manufacturer_keys };
-    });
+    
+// Load manufacturers for these dealers in one query (views cannot embed relationships).
+const ids = all.map((d: any) => d.id).filter(Boolean);
+const manuByDealer = new Map<string, string[]>();
+if (ids.length) {
+  const { data: manuRows, error: mErr } = await supabase
+    .from("dealer_manufacturers")
+    .select("dealer_id,manufacturer_key")
+    .in("dealer_id", ids);
+  if (mErr) return bad(mErr.message, 500);
+  for (const r of manuRows ?? []) {
+    const arr = manuByDealer.get((r as any).dealer_id) ?? [];
+    arr.push((r as any).manufacturer_key);
+    manuByDealer.set((r as any).dealer_id, arr);
+  }
+}
 
-    // Server-side visibility restriction for reps (country + optional PLZ-territories)
-    if (scope) {
-      items = items.filter((d: any) => dealerInTerritory(d, scope.territories, scope.allowedCountries));
-    }
+const items = all.map((d: any) => {
+      const manufacturer_keys = manuByDealer.get(d.id) ?? [];
+      const has_flyer = manufacturer_keys.includes("flyer");
+return { ...d, has_flyer, manufacturer_keys };
+    });
 
     return ok({ items });
   } catch (e: any) {

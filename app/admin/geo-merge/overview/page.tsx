@@ -90,7 +90,10 @@ export default function GeoMergeOverviewPage() {
           <h1 className="text-xl font-semibold">Geo-Merge Übersicht</h1>
           <p className="text-slate-600 text-sm">Wie viele Merges · normal vs. force · inkl. Liste.</p>
         </div>
-        <div />
+        <div className="flex gap-2">
+          <Link href="/admin/geo-merge" className="text-sm text-blue-600 hover:underline">Zur Geo-Merge-Liste</Link>
+          <Link href="/admin" className="text-sm text-blue-600 hover:underline">Admin</Link>
+        </div>
       </div>
 
       {err ? <div className="text-sm text-red-700 mb-4">{err}</div> : null}

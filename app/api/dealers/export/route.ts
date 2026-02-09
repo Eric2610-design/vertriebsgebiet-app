@@ -1,7 +1,6 @@
 import * as XLSX from "xlsx";
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
-import { getDealerScope, dealerInTerritory } from "@/app/api/_dealerScope";
 
 // Export a set of dealer ids to an .xlsx file.
 // Used for the "Händler im Kartenausschnitt" list.
@@ -12,23 +11,32 @@ export async function POST(req: Request) {
     if (!ids.length) return bad("Keine Händler-IDs übergeben", 400);
 
     const supabase = supabaseService();
-    const scope = await getDealerScope();
     const { data, error } = await supabase
-      .from("dealers")
-      .select(
-        `
-          id,name,street,zip,city,country,phone,email,website,opening_hours,lat,lng,geocode_status,notes,buying_group_key,
-          dealer_manufacturers!left(manufacturer_key)
-        `
-      )
+      .from("v_dealers_master")
+      .select(`id,name,street,zip,city,country_iso,phone,email,website,opening_hours,lat,lng,geocode_status,notes,buying_group_key,sources,source_count`)
       .in("id", ids);
 
     if (error) return bad(error.message, 500);
 
-    const scoped = scope ? (data ?? []).filter((d: any) => dealerInTerritory(d, scope.territories, scope.allowedCountries)) : (data ?? []);
 
-    const rows = scoped.map((d: any) => {
-      const manufacturer_keys = (d.dealer_manufacturers ?? []).map((x: any) => x.manufacturer_key).join(",");
+// Load manufacturers for export (views cannot embed relationships).
+const manuByDealer = new Map<string, string[]>();
+if (ids.length) {
+  const { data: manuRows, error: mErr } = await supabase
+    .from("dealer_manufacturers")
+    .select("dealer_id,manufacturer_key")
+    .in("dealer_id", ids);
+  if (mErr) return bad(mErr.message, 500);
+  for (const r of manuRows ?? []) {
+    const arr = manuByDealer.get((r as any).dealer_id) ?? [];
+    arr.push((r as any).manufacturer_key);
+    manuByDealer.set((r as any).dealer_id, arr);
+  }
+}
+
+
+    const rows = (data ?? []).map((d: any) => {
+      const manufacturer_keys = (manuByDealer.get(d.id) ?? []).join(",");
       return {
         id: d.id,
         name: d.name,
