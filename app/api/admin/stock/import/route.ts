@@ -131,6 +131,7 @@ export async function POST(req: Request) {
       }
       return bad(message, 500);
     }
+    if (runRes.error || !runRes.data) return bad(runRes.error?.message || "Snapshot konnte nicht angelegt werden", 500);
 
     const runId = runRes.data.id as string;
     const withRun = items.map((item) => ({ ...item, run_id: runId }));
@@ -147,6 +148,7 @@ export async function POST(req: Request) {
         }
         return bad(message, 500);
       }
+      if (insertRes.error) return bad(insertRes.error.message, 500);
     }
 
     return ok({
