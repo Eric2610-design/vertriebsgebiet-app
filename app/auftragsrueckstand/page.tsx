@@ -19,9 +19,20 @@ type Row = {
   col_v: string | null;
   col_z: string | null;
   col_aa: string | null;
+  col_aa_date: string | null;
   col_ah: string | null;
   col_ak: string | null;
   col_ap: string | null;
+};
+
+type Summary = {
+  rows: number;
+  orders: number;
+  articles: number;
+  ch: number;
+  non_ch: number;
+  matched_dealers: number;
+  unmatched_dealers: number;
 };
 
 export default function AuftragsRueckstandPage() {
@@ -30,6 +41,8 @@ export default function AuftragsRueckstandPage() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [headers, setHeaders] = useState<Record<string, string>>({});
 
   async function load() {
     setLoading(true);
@@ -40,10 +53,14 @@ export default function AuftragsRueckstandPage() {
       if (!res.ok) throw new Error(json?.error ?? res.statusText);
       setRun(json.run ?? null);
       setRows(json.rows ?? []);
+      setSummary(json.summary ?? null);
+      setHeaders(json.headers ?? {});
     } catch (e: any) {
       setErr(e?.message ?? "Fehler");
       setRun(null);
       setRows([]);
+      setSummary(null);
+      setHeaders({});
     } finally {
       setLoading(false);
     }
@@ -68,9 +85,30 @@ export default function AuftragsRueckstandPage() {
 
   const formatDate = (value: string | null) => {
     if (!value) return "";
-    const parsed = new Date(value);
+    const trimmed = String(value).trim();
+    if (!trimmed) return "";
+    const german = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+    if (german) {
+      const d = german[1].padStart(2, "0");
+      const m = german[2].padStart(2, "0");
+      const y = german[3];
+      return `${d}.${m}.${y}`;
+    }
+    if (/^\d+(\.\d+)?$/.test(trimmed)) {
+      const serial = Number(trimmed);
+      if (Number.isFinite(serial)) {
+        const jsDate = new Date((serial - 25569) * 86400000);
+        if (!Number.isNaN(jsDate.getTime())) return jsDate.toLocaleDateString("de-DE");
+      }
+    }
+    const parsed = new Date(trimmed);
     if (Number.isNaN(parsed.getTime())) return value;
     return parsed.toLocaleDateString("de-DE");
+  };
+
+  const label = (key: string, fallback: string) => {
+    const raw = String(headers[key] ?? "").trim();
+    return raw || fallback;
   };
 
   return (
@@ -107,6 +145,41 @@ export default function AuftragsRueckstandPage() {
           </Card>
         )}
 
+        {!loading && !err && summary && (
+          <Card>
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+                <div className="rounded-xl border bg-white p-3">
+                  <div className="text-xs uppercase text-neutral-500">Zeilen</div>
+                  <div className="text-lg font-semibold">{summary.rows}</div>
+                </div>
+                <div className="rounded-xl border bg-white p-3">
+                  <div className="text-xs uppercase text-neutral-500">Aufträge</div>
+                  <div className="text-lg font-semibold">{summary.orders}</div>
+                </div>
+                <div className="rounded-xl border bg-white p-3">
+                  <div className="text-xs uppercase text-neutral-500">Artikel</div>
+                  <div className="text-lg font-semibold">{summary.articles}</div>
+                </div>
+                <div className="rounded-xl border bg-white p-3">
+                  <div className="text-xs uppercase text-neutral-500">CH / DE-AT</div>
+                  <div className="text-lg font-semibold">
+                    {summary.ch} / {summary.non_ch}
+                  </div>
+                </div>
+                <div className="rounded-xl border bg-white p-3">
+                  <div className="text-xs uppercase text-neutral-500">Händler gematcht</div>
+                  <div className="text-lg font-semibold">{summary.matched_dealers}</div>
+                </div>
+                <div className="rounded-xl border bg-white p-3">
+                  <div className="text-xs uppercase text-neutral-500">Händler unbekannt</div>
+                  <div className="text-lg font-semibold">{summary.unmatched_dealers}</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         <Card>
           <CardContent>
             {loading ? (
@@ -117,20 +190,22 @@ export default function AuftragsRueckstandPage() {
                   <thead className="text-left">
                     <tr className="border-b">
                       <th className="py-2 pr-3">#</th>
-                      <th className="py-2 pr-3">Artikel</th>
-                      <th className="py-2 pr-3">Datum</th>
+                      <th className="py-2 pr-3">{label("N", "Artikel")}</th>
+                      <th className="py-2 pr-3">{label("D", "Datum")}</th>
                       <th className="py-2 pr-3">Kundennr</th>
                       <th className="py-2 pr-3">Händler</th>
-                      <th className="py-2 pr-3">A</th>
-                      <th className="py-2 pr-3">M</th>
-                      <th className="py-2 pr-3">V</th>
-                      <th className="py-2 pr-3">Z</th>
+                      <th className="py-2 pr-3">{label("A", "A")}</th>
+                      <th className="py-2 pr-3">{label("M", "M")}</th>
+                      <th className="py-2 pr-3">{label("V", "V")}</th>
+                      <th className="py-2 pr-3">{label("Z", "Z")}</th>
                       <th className="py-2 pr-3">Rahmengröße</th>
-                      <th className="py-2 pr-3">AA</th>
-                      <th className="py-2 pr-3">AH</th>
-                      <th className="py-2 pr-3">AK</th>
-                      <th className="py-2 pr-3">AP</th>
-                      <th className="py-2 pr-3">Preis</th>
+                      <th className="py-2 pr-3">{label("AA", "AA")}</th>
+                      <th className="py-2 pr-3">{label("AH", "AH")}</th>
+                      <th className="py-2 pr-3">{label("AK", "AK")}</th>
+                      <th className="py-2 pr-3">{label("AP", "AP")}</th>
+                      <th className="py-2 pr-3">
+                        Preis ({label("AR", "AR")} / {label("AS", "AS")})
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -146,7 +221,7 @@ export default function AuftragsRueckstandPage() {
                         <td className="py-2 pr-3">{r.col_v ?? ""}</td>
                         <td className="py-2 pr-3">{r.col_z ?? ""}</td>
                         <td className="py-2 pr-3">{r.frame_size ?? ""}</td>
-                        <td className="py-2 pr-3">{r.col_aa ?? ""}</td>
+                        <td className="py-2 pr-3">{formatDate(r.col_aa_date ?? r.col_aa)}</td>
                         <td className="py-2 pr-3">{r.col_ah ?? ""}</td>
                         <td className="py-2 pr-3">{r.col_ak ?? ""}</td>
                         <td className="py-2 pr-3">{r.col_ap ?? ""}</td>

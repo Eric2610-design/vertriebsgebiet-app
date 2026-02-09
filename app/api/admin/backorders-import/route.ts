@@ -23,6 +23,23 @@ const COL = {
   AS: 44,
 } as const;
 
+const HEADER_COLS = {
+  A: 0,
+  B: 1,
+  D: 3,
+  G: 6,
+  M: 12,
+  N: 13,
+  V: 21,
+  Z: 25,
+  AA: 26,
+  AH: 33,
+  AK: 36,
+  AP: 41,
+  AR: 43,
+  AS: 44,
+} as const;
+
 type DealerMatch = {
   dealer_id: string | null;
   dealer_country: string | null;
@@ -95,6 +112,16 @@ function hasRowValues(row: any[]): boolean {
   return row.some((cell) => norm(cell) !== "");
 }
 
+function extractHeaders(headerRow: any[] | undefined) {
+  const headers: Record<string, string> = {};
+  for (const [key, idx] of Object.entries(HEADER_COLS)) {
+    const raw = headerRow?.[idx];
+    const value = norm(raw);
+    headers[key] = value || key;
+  }
+  return headers;
+}
+
 async function loadDealerMatches(supabase: ReturnType<typeof supabaseService>, customerNos: string[]) {
   const map = new Map<string, DealerMatch>();
   const chunkSize = 500;
@@ -154,6 +181,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "missing_sheet" }, { status: 400 });
   }
   const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" }) as any[][];
+  const headers = extractHeaders(rawRows[0]);
 
   const supabase = supabaseService();
 
@@ -236,6 +264,7 @@ export async function POST(req: Request) {
       col_v: norm(row[COL.V]) || null,
       col_z: norm(row[COL.Z]) || null,
       col_aa: norm(row[COL.AA]) || null,
+      col_aa_date: toISODate(row[COL.AA]),
       col_ah: norm(row[COL.AH]) || null,
       col_ak: norm(row[COL.AK]) || null,
       col_ap: norm(row[COL.AP]) || null,
@@ -262,6 +291,7 @@ export async function POST(req: Request) {
     matched_dealers: matchedDealers,
     missing_article_no: missingArticle,
     missing_order_date: missingOrderDate,
+    headers,
   };
 
   await supabase.from("backorder_runs").update({ stats }).eq("id", run.id);
