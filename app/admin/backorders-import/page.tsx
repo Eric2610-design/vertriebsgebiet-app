@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import RequireRole from "@/components/RequireRole";
+import { Card, CardContent, Button } from "@/components/ui";
 
 export default function BackordersImportPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -18,7 +19,7 @@ export default function BackordersImportPage() {
     const json = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      setLog(`❌ Fehler: ${json?.error ?? res.statusText}`);
+      setLog(`❌ Fehler: ${json?.error ?? res.statusText}\n${json?.run_id ? "run_id: " + json.run_id : ""}`);
       return;
     }
 
@@ -30,23 +31,23 @@ export default function BackordersImportPage() {
       <div className="mx-auto max-w-4xl p-4 md:p-8 space-y-4">
         <div>
           <h1 className="text-2xl font-semibold">Auftragsrückstand · Import</h1>
-          <p className="text-sm text-slate-600">
-            Admin lädt die Datei „Auftragsbestandsposten…xlsx“ hoch. Die Rückstandsliste nutzt immer den neuesten Snapshot.
+          <p className="text-sm text-neutral-600">
+            Admin lädt die Excel „Auftragsbestandsposten…“ hoch. Außendienst sieht danach die Rückstandsliste.
           </p>
         </div>
 
-        <div className="rounded-2xl border bg-white p-4 space-y-3">
-          <input type="file" accept=".xlsx" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-          <button
-            onClick={runImport}
-            disabled={!file}
-            className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            Import starten
-          </button>
-        </div>
+        <Card>
+          <CardContent>
+            <div className="space-y-3">
+              <input type="file" accept=".xlsx" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+              <Button onClick={runImport} disabled={!file}>
+                Import starten
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
 
-        {log ? <pre className="rounded-2xl border bg-slate-50 p-4 text-xs overflow-auto">{log}</pre> : null}
+        {log ? <pre className="rounded-2xl border bg-neutral-50 p-4 text-xs overflow-auto">{log}</pre> : null}
       </div>
     </RequireRole>
   );
