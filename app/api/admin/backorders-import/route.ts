@@ -8,6 +8,7 @@ import { supabaseService } from "@/lib/supabase";
 
 const COL = {
   A: 0,
+  B: 1,
   D: 3,
   G: 6,
   M: 12,
@@ -174,9 +175,17 @@ export async function POST(req: Request) {
     .slice(1)
     .filter((row) => Array.isArray(row) && hasRowValues(row as any[]));
 
-  const uniqueCustomers = new Set<string>();
+  const deduped = new Map<string, any[]>();
   for (const row of dataRows) {
-    const customerNo = parseCustomerNo((row as any[])[COL.G]);
+    const orderNo = norm((row as any[])[COL.A]);
+    const posNo = norm((row as any[])[COL.B]);
+    const key = `${orderNo}__${posNo}`;
+    deduped.set(key, row as any[]);
+  }
+
+  const uniqueCustomers = new Set<string>();
+  for (const row of deduped.values()) {
+    const customerNo = parseCustomerNo(row[COL.G]);
     if (customerNo) uniqueCustomers.add(customerNo);
   }
 
@@ -189,12 +198,12 @@ export async function POST(req: Request) {
 
   const items: any[] = [];
 
-  for (const r of dataRows) {
-    const row = r as any[];
+  for (const row of deduped.values()) {
+    const orderNo = norm(row[COL.A]) || null;
+    const posNo = norm(row[COL.B]) || null;
     const orderDate = toISODate(row[COL.D]);
     if (!orderDate) {
       missingOrderDate++;
-      continue;
     }
 
     const articleNo = parseArticleNo(row[COL.N]);
@@ -211,13 +220,17 @@ export async function POST(req: Request) {
 
     items.push({
       run_id: run.id,
-      order_date: orderDate,
+      order_no: orderNo,
+      pos_no: posNo,
+      order_date: orderDate ?? null,
       article_no: articleNo,
+      customer_raw: norm(row[COL.G]) || null,
       customer_no: customerNo,
       dealer_name: dealerName,
       dealer_id: dealerMatch?.dealer_id ?? null,
       dealer_country: dealerMatch?.dealer_country ?? null,
       dealer_zip: dealerMatch?.dealer_zip ?? null,
+      article_raw: norm(row[COL.N]) || null,
       col_a: norm(row[COL.A]) || null,
       col_m: norm(row[COL.M]) || null,
       col_v: norm(row[COL.V]) || null,
@@ -244,6 +257,7 @@ export async function POST(req: Request) {
 
   const stats = {
     rows_in_file: dataRows.length,
+    rows_after_dedupe: deduped.size,
     inserted,
     matched_dealers: matchedDealers,
     missing_article_no: missingArticle,
