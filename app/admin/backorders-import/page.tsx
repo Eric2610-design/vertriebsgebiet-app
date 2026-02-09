@@ -66,9 +66,23 @@ export default function BackordersImportPage() {
         ) : null}
 
         {result ? (
-          <pre className="rounded-2xl border bg-neutral-50 p-4 text-xs overflow-auto">
-            {JSON.stringify(result, null, 2)}
-          </pre>
+          <div className="rounded-2xl border bg-neutral-50 p-4 text-sm space-y-3">
+            <div>
+              <div className="text-xs uppercase text-neutral-500">Run</div>
+              <div className="font-mono text-xs">{result?.run_id ?? "-"}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-neutral-500">Stats</div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {Object.entries(result?.stats ?? {}).map(([key, value]) => (
+                  <div key={key} className="rounded-xl border bg-white p-3">
+                    <div className="text-xs uppercase text-neutral-500">{key}</div>
+                    <div className="text-base font-semibold">{String(value ?? "-")}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         ) : null}
       </div>
     </RequireRole>
