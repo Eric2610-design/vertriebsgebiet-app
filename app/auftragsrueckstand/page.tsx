@@ -10,7 +10,6 @@ type Row = {
   order_date: string | null;
   customer_no: string | null;
   dealer_name: string | null;
-  dealer_country: string | null;
   order_seq: number | null;
   frame_size: string | null;
   price_col: string | null;
@@ -27,6 +26,7 @@ type Row = {
 
 export default function AuftragsRueckstandPage() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [run, setRun] = useState<{ id: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -35,13 +35,14 @@ export default function AuftragsRueckstandPage() {
     setLoading(true);
     setErr(null);
     try {
-      const url = q ? `/api/backorders?q=${encodeURIComponent(q)}&limit=5000` : `/api/backorders?limit=5000`;
-      const res = await fetch(url);
+      const res = await fetch("/api/backorders");
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error ?? res.statusText);
+      setRun(json.run ?? null);
       setRows(json.rows ?? []);
     } catch (e: any) {
       setErr(e?.message ?? "Fehler");
+      setRun(null);
       setRows([]);
     } finally {
       setLoading(false);
@@ -64,6 +65,13 @@ export default function AuftragsRueckstandPage() {
       );
     });
   }, [rows, q]);
+
+  const formatDate = (value: string | null) => {
+    if (!value) return "";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleDateString("de-DE");
+  };
 
   return (
     <RequireRole allow={["aussendienst", "admin", "superadmin"]}>
@@ -89,6 +97,16 @@ export default function AuftragsRueckstandPage() {
           </Card>
         )}
 
+        {!loading && !err && !run && (
+          <Card>
+            <CardContent>
+              <div className="text-sm text-neutral-600">
+                Noch kein Auftragsrückstand vorhanden. Bitte zuerst einen Import im Adminbereich durchführen.
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         <Card>
           <CardContent>
             {loading ? (
@@ -103,17 +121,16 @@ export default function AuftragsRueckstandPage() {
                       <th className="py-2 pr-3">Datum</th>
                       <th className="py-2 pr-3">Kundennr</th>
                       <th className="py-2 pr-3">Händler</th>
-                      <th className="py-2 pr-3">Land</th>
-                      <th className="py-2 pr-3">Rahmengröße</th>
                       <th className="py-2 pr-3">A</th>
                       <th className="py-2 pr-3">M</th>
                       <th className="py-2 pr-3">V</th>
                       <th className="py-2 pr-3">Z</th>
+                      <th className="py-2 pr-3">Rahmengröße</th>
                       <th className="py-2 pr-3">AA</th>
                       <th className="py-2 pr-3">AH</th>
                       <th className="py-2 pr-3">AK</th>
                       <th className="py-2 pr-3">AP</th>
-                      <th className="py-2 pr-3">AR/AS</th>
+                      <th className="py-2 pr-3">Preis</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -121,15 +138,14 @@ export default function AuftragsRueckstandPage() {
                       <tr key={r.id} className="border-b last:border-b-0">
                         <td className="py-2 pr-3 font-semibold">{r.order_seq ?? ""}</td>
                         <td className="py-2 pr-3">{r.article_no}</td>
-                        <td className="py-2 pr-3">{r.order_date ?? ""}</td>
+                        <td className="py-2 pr-3">{formatDate(r.order_date)}</td>
                         <td className="py-2 pr-3">{r.customer_no ?? ""}</td>
                         <td className="py-2 pr-3">{r.dealer_name ?? ""}</td>
-                        <td className="py-2 pr-3">{r.dealer_country ?? ""}</td>
-                        <td className="py-2 pr-3">{r.frame_size ?? ""}</td>
                         <td className="py-2 pr-3">{r.col_a ?? ""}</td>
                         <td className="py-2 pr-3">{r.col_m ?? ""}</td>
                         <td className="py-2 pr-3">{r.col_v ?? ""}</td>
                         <td className="py-2 pr-3">{r.col_z ?? ""}</td>
+                        <td className="py-2 pr-3">{r.frame_size ?? ""}</td>
                         <td className="py-2 pr-3">{r.col_aa ?? ""}</td>
                         <td className="py-2 pr-3">{r.col_ah ?? ""}</td>
                         <td className="py-2 pr-3">{r.col_ak ?? ""}</td>
@@ -139,7 +155,7 @@ export default function AuftragsRueckstandPage() {
                     ))}
                     {filtered.length === 0 && (
                       <tr>
-                        <td colSpan={16} className="py-6 text-center text-neutral-500">
+                        <td colSpan={15} className="py-6 text-center text-neutral-500">
                           Keine Daten (erst Import im Adminbereich machen).
                         </td>
                       </tr>

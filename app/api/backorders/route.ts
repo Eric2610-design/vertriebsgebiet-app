@@ -27,19 +27,18 @@ function isCH(country: string | null) {
   return String(country ?? "").toUpperCase() === "CH";
 }
 
-export async function GET(req: Request) {
+export async function GET() {
   const role = await getVtRole();
   if (!role) return NextResponse.json({ error: "not_authenticated" }, { status: 401 });
+  if (!["aussendienst", "admin", "superadmin"].includes(role)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
 
   const supabase = supabaseService();
 
-  const url = new URL(req.url);
-  const limit = Math.min(5000, Math.max(1, Number(url.searchParams.get("limit") ?? "2000")));
-  const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
-
   const { data: run, error: runErr } = await supabase
     .from("backorder_runs")
-    .select("id, created_at")
+    .select("id")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -53,15 +52,7 @@ export async function GET(req: Request) {
       "id, article_no, order_date, col_a, col_m, col_v, col_z, col_aa, col_ah, col_ak, col_ap, col_ar, col_as, customer_no, dealer_name, dealer_country"
     )
     .eq("run_id", run.id)
-    .limit(limit);
-
-  // basic search server-side on a few fields (optional)
-  if (q) {
-    // PostgREST OR syntax
-    query = query.or(
-      `article_no.ilike.%${q}%,customer_no.ilike.%${q}%,dealer_name.ilike.%${q}%`
-    );
-  }
+    .limit(5000);
 
   const { data: rows, error: rowsErr } = await query;
 
@@ -138,5 +129,5 @@ export async function GET(req: Request) {
     };
   });
 
-  return NextResponse.json({ ok: true, role, run, rows: result });
+  return NextResponse.json({ ok: true, run, rows: result });
 }
