@@ -38,7 +38,7 @@ export async function GET(req: Request) {
   let query = supabase
     .from("stock_items")
     .select(
-      "id,sku,name,model_year,series,model,color,frame_size,frame_type,battery,motor_type,motor_brand,price_eur,price_chf,avail_now,avail_total,availability_plan"
+      "id,sku,name,model_year,series,model,color,frame_size,frame_type,battery,motor_type,motor_brand,price_eur,price_chf,avail_now,avail_total,availability_plan,raw"
     )
     .eq("run_id", runRes.data.id)
     .limit(limit);
