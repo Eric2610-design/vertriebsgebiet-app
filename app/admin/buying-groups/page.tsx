@@ -227,11 +227,7 @@ export default function BuyingGroupsPage() {
           <h1 className="text-xl font-semibold">Einkaufsverbände</h1>
           <p className="text-slate-600 text-sm">Übersicht und Zuordnung von Händlern zu Einkaufsverbänden.</p>
         </div>
-        <div className="flex gap-2">
-          <Link href="/map" className="text-sm text-blue-600 hover:underline">Zur Karte</Link>
-          <Link href="/cleanup" className="text-sm text-blue-600 hover:underline">Cleanup</Link>
-          <Link href="/admin" className="text-sm text-blue-600 hover:underline">Admin</Link>
-        </div>
+        <div />
       </div>
 
       {err ? <div className="text-sm text-red-700 mb-4">{err}</div> : null}
