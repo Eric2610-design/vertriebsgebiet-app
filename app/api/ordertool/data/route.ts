@@ -12,6 +12,26 @@ function sortValues(values: Set<string>) {
     .sort((a, b) => a.localeCompare(b, "de"));
 }
 
+function batteryLabel(tile: {
+  battery_min?: number | null;
+  battery_max?: number | null;
+  battery_note?: string | null;
+  battery_tags?: string[] | null;
+}) {
+  const note = String(tile.battery_note || "").trim();
+  if (note) return note;
+  const min = tile.battery_min ?? null;
+  const max = tile.battery_max ?? null;
+  if (min && max) {
+    if (min === max) return `${min}Wh`;
+    return `${min}–${max}Wh`;
+  }
+  if (Array.isArray(tile.battery_tags) && tile.battery_tags.length) {
+    return String(tile.battery_tags[0] || "").trim();
+  }
+  return "";
+}
+
 async function requireAuthed() {
   const c = await cookies();
   const authed = c.get("vt_authed")?.value === "1";
@@ -34,11 +54,15 @@ export async function GET() {
 
   const { data: tiles, error } = await supabase
     .from("ordertool_stock_tiles")
-    .select("motor,preisart,battery_tags,rows")
+    .select("motor,preisart,frame,battery_tags,battery_min,battery_max,battery_note,rows")
     .limit(2000);
 
   const attributes: AttributeMap = {
     motor: [],
+    frame: [],
+    color: [],
+    size: [],
+    battery: [],
     status: [],
     battery_tags: [],
     preisart: [],
@@ -48,24 +72,36 @@ export async function GET() {
     const motors = new Set<string>();
     const statuses = new Set<string>();
     const batteries = new Set<string>();
+    const frames = new Set<string>();
+    const colors = new Set<string>();
+    const sizes = new Set<string>();
     const preisarten = new Set<string>();
 
     for (const tile of tiles) {
       if (tile?.motor) motors.add(String(tile.motor));
+      if (tile?.frame) frames.add(String(tile.frame));
       if (tile?.preisart) preisarten.add(String(tile.preisart));
       if (Array.isArray(tile?.battery_tags)) {
         for (const tag of tile.battery_tags) {
           if (tag) batteries.add(String(tag));
         }
       }
+      const battery = batteryLabel(tile);
+      if (battery) batteries.add(battery);
       if (Array.isArray(tile?.rows)) {
         for (const row of tile.rows) {
           if (row?.status) statuses.add(String(row.status));
+          if (row?.color) colors.add(String(row.color));
+          if (row?.size) sizes.add(String(row.size));
         }
       }
     }
 
     attributes.motor = sortValues(motors);
+    attributes.frame = sortValues(frames);
+    attributes.color = sortValues(colors);
+    attributes.size = sortValues(sizes);
+    attributes.battery = sortValues(batteries);
     attributes.status = sortValues(statuses);
     attributes.battery_tags = sortValues(batteries);
     attributes.preisart = sortValues(preisarten);

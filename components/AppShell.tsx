@@ -29,6 +29,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const { me, loading } = useUser();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [cartSummary, setCartSummary] = useState({ items: 0, qty: 0 });
 
   // We only want the "Topbar" UX on iOS. On other platforms, navigation lives in the sidebar.
   // This prevents the mobile/topbar UI from showing up on laptop Chrome when the window is narrow.
@@ -36,6 +37,42 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const ua = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
     setIsIOS(/iPad|iPhone|iPod/i.test(ua));
   }, []);
+
+  useEffect(() => {
+    if (!pathname?.startsWith("/ordertool")) return;
+    const readCart = () => {
+      if (typeof window === "undefined") return;
+      const keys = ["FLYER_ORDER_AUTOSAVE_V1_DE", "FLYER_ORDER_AUTOSAVE_V1_CH"];
+      let items = 0;
+      let qty = 0;
+      for (const key of keys) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (!raw) continue;
+          const parsed = JSON.parse(raw);
+          const cart = parsed?.cart || {};
+          for (const entry of Object.values(cart)) {
+            const q = Number((entry as any)?.q ?? entry);
+            if (Number.isFinite(q) && q > 0) {
+              items += 1;
+              qty += q;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+      setCartSummary({ items, qty });
+    };
+    readCart();
+    const onStorage = () => readCart();
+    window.addEventListener("storage", onStorage);
+    const interval = window.setInterval(readCart, 2000);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.clearInterval(interval);
+    };
+  }, [pathname]);
 
   const visibleItems = useMemo(() => {
     const role = me?.role ?? null;
@@ -254,9 +291,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Main */}
       <div className="md:pl-64">
         <div className="sticky top-0 z-30 border-b border-black bg-black px-4 py-3 text-white">
-          <div className="flex items-center gap-3">
-            <img src="/brands/flyer.png" alt="FLYER" className="h-8 w-8 object-contain" />
+          <div className="flex items-center justify-between gap-3">
             <div className="text-sm font-semibold">FLYER Vertriebs-App</div>
+            {pathname?.startsWith("/ordertool") ? (
+              <div className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs">
+                Warenkorb: {cartSummary.items} Artikel · {cartSummary.qty} Stück
+              </div>
+            ) : null}
           </div>
         </div>
         <main className="w-full max-w-none px-4 py-6">{children}</main>

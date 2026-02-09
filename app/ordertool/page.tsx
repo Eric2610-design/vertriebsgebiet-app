@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
-import { Badge, Button, Input, Select } from "@/components/ui";
+import { useMemo, useState, useEffect, useRef } from "react";
+import { Badge, Button, Card, CardContent, CardHeader, Input, Select } from "@/components/ui";
 import type { Dealer, Territory } from "@/lib/types";
 
 type Market = "DE_AT" | "CH";
@@ -15,6 +15,11 @@ type DealerListItem = Dealer & {
   customer_no?: string | null;
 };
 
+const TEMPLATE_LINKS = {
+  DE_AT: "/ordertool/template_de_at.html",
+  CH: "/ordertool/template_ch.html",
+} as const;
+
 const plz2 = (zip?: string | null) => {
   if (!zip) return null;
   const m = String(zip).match(/(\d{2})/);
@@ -25,7 +30,6 @@ const plz2 = (zip?: string | null) => {
 
 export default function OrdertoolPage() {
   const [market, setMarket] = useState<"DE_AT" | "CH">("DE_AT");
-  const [showHelp, setShowHelp] = useState(true);
   const [dealers, setDealers] = useState<DealerListItem[]>([]);
   const [dealerQuery, setDealerQuery] = useState("");
   const [selectedDealerId, setSelectedDealerId] = useState("");
@@ -33,6 +37,8 @@ export default function OrdertoolPage() {
   const [dealerLoading, setDealerLoading] = useState(false);
   const [dealerError, setDealerError] = useState<string | null>(null);
   const [dealerRestricted, setDealerRestricted] = useState(false);
+  const [iframeSrc, setIframeSrc] = useState<string>("");
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,124 +115,116 @@ export default function OrdertoolPage() {
       };
       localStorage.setItem("FLYER_ORDERTOOL_PREFILL_V1", JSON.stringify(payload));
       localStorage.setItem("flyer_market", market === "CH" ? "CH" : "DE");
-      const target = market === "CH" ? links.templateCH : links.templateDE;
-      window.open(target, "_blank", "noopener,noreferrer");
+      const target = market === "CH" ? TEMPLATE_LINKS.CH : TEMPLATE_LINKS.DE_AT;
+      setIframeSrc(target);
+      setTimeout(() => {
+        iframeRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
     } catch {
       alert("Ordertool konnte nicht geöffnet werden.");
     }
   };
 
-  const links = {
-    dummyStock: "/ordertool/dummy_stock.xlsx",
-    templateDE: "/ordertool/template_de_at.html",
-    templateCH: "/ordertool/template_ch.html",
-  };
-
   return (
-    <div className="-mx-4 -mt-6 bg-gradient-to-b from-[#060a14] to-[#0b1220] pb-10 text-slate-100">
-      <div className="mx-auto max-w-[1100px] px-4 pt-8">
-        <div className="rounded-[18px] border border-slate-700/40 bg-slate-900/80 p-5 shadow-[0_18px_55px_rgba(0,0,0,0.35)]">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h1 className="text-lg font-semibold">FLYER Ordertool</h1>
-              <div className="mt-1 text-sm text-slate-300">
-                Lagerbestand aus dem aktuellen Snapshot. Suche und filtere nach Artikelnummer oder Modell.
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <MarketBadge market={market} />
-              <Select
-                value={market}
-                onChange={(e) => setMarket(e.target.value as Market)}
-                className="h-10 w-36 rounded-xl border border-slate-700/60 bg-[#0b1220] text-sm font-semibold text-slate-100"
-              >
-                <option value="DE_AT">🇩🇪 DE / AT</option>
-                <option value="CH">🇨🇭 CH</option>
-              </Select>
-              <Button variant="secondary" onClick={() => setShowHelp((v) => !v)}>
-                {showHelp ? "Hilfe ausblenden" : "Hilfe anzeigen"}
-              </Button>
-            </div>
-          </div>
-
-          <div className="mt-6 space-y-4">
-            <div className="rounded-xl border border-slate-700/50 bg-[#0b1220] p-4">
-              <div className="text-sm font-semibold">Händler &amp; Bestellung öffnen</div>
-              <div className="mt-1 text-xs text-slate-400">
-                {dealerRestricted
-                  ? "Es werden nur Händler aus deinem Gebiet angezeigt."
-                  : "Admins sehen alle Händler. Kundennummer ist optional."}
-              </div>
-              <div className="mt-3 space-y-2">
-                <Input
-                  value={dealerQuery}
-                  onChange={(e) => setDealerQuery(e.target.value)}
-                  placeholder="Händler suchen…"
-                />
-                <select
-                  className="w-full rounded-xl border border-slate-700/50 bg-[#0b1220] px-3 py-2 text-sm text-slate-100"
-                  value={selectedDealerId}
-                  onChange={(e) => setSelectedDealerId(e.target.value)}
-                >
-                  <option value="">{dealerLoading ? "Lade Händler…" : "Händler auswählen…"}</option>
-                  {filteredDealers.map((dealer) => (
-                    <option key={dealer.id} value={dealer.id}>
-                      {dealer.name} · {dealer.zip ?? "—"} {dealer.city ?? ""}
-                    </option>
-                  ))}
-                </select>
-                <Input
-                  value={customerNo}
-                  onChange={(e) => setCustomerNo(e.target.value)}
-                  placeholder="Kundennummer (optional)"
-                />
-                <Button className="w-full" onClick={handleStartOrder} disabled={!selectedDealer || dealerLoading}>
-                  Bestellung im Ordertool öffnen
-                </Button>
-                {dealerError ? <div className="text-xs text-rose-400">{dealerError}</div> : null}
-              </div>
-            </div>
-
-            {showHelp && (
-              <div className="rounded-xl border border-slate-700/50 bg-slate-900/40 p-3 text-xs text-slate-300">
-                <div className="font-semibold">So testest du es schnell:</div>
-                <ol className="mt-2 list-decimal space-y-1 pl-4">
-                  <li>Im Generator Regeln/Schwellen + Preisbuch wie gewohnt auswählen.</li>
-                  <li>Beim Lagerbestand nimmst du diese Dummy-Datei (Download unten).</li>
-                  <li>
-                    Market stellst du hier oben auf DE/AT oder CH – im Generator wählst du entsprechend das passende
-                    Template.
-                  </li>
-                </ol>
-              </div>
-            )}
-
-            <div className="grid gap-2">
-              <a href={links.dummyStock} download>
-                <Button className="w-full" variant="secondary">
-                  Dummy-Lagerbestand herunterladen
-                </Button>
-              </a>
-              <a href={links.templateDE} download>
-                <Button className="w-full" variant="secondary">
-                  Standalone HTML (DE/AT)
-                </Button>
-              </a>
-              <a href={links.templateCH} download>
-                <Button className="w-full" variant="secondary">
-                  Standalone HTML (CH)
-                </Button>
-              </a>
-            </div>
-
-            <div className="text-xs text-slate-400">
-              Hinweis: Aus Sicherheitsgründen kann die App die Dateiauswahl im Generator nicht automatisch befüllen. Du
-              lädst die Dateien im Generator wie bisher über dessen Upload-Felder. Die Standalone-HTML kannst du direkt
-              an Händler senden.
-            </div>
+    <div className="mx-auto max-w-5xl space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-xl font-semibold">Ordertool</h1>
+          <div className="text-sm text-slate-600">
+            Lagerbestand aus dem aktuellen Snapshot. Suche und filtere nach Artikelnummer oder Modell.
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <MarketBadge market={market} />
+          <Select
+            value={market}
+            onChange={(e) => setMarket(e.target.value as Market)}
+            className="h-10 w-36 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-900"
+          >
+            <option value="DE_AT">🇩🇪 DE / AT</option>
+            <option value="CH">🇨🇭 CH</option>
+          </Select>
+        </div>
+        <div className="w-full flex flex-wrap gap-2 md:w-auto md:min-w-[420px]">
+          <select
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 md:w-[260px]"
+            value={selectedDealerId}
+            onChange={(e) => setSelectedDealerId(e.target.value)}
+          >
+            <option value="">{dealerLoading ? "Lade Händler…" : "Händler auswählen…"}</option>
+            {filteredDealers.map((dealer) => (
+              <option key={dealer.id} value={dealer.id}>
+                {dealer.name} · {dealer.zip ?? "—"} {dealer.city ?? ""}
+              </option>
+            ))}
+          </select>
+          <Input
+            value={customerNo}
+            onChange={(e) => setCustomerNo(e.target.value)}
+            placeholder="Kundennummer"
+            className="w-full md:w-[160px]"
+          />
+        </div>
       </div>
+
+      <Card>
+        <CardHeader className="text-sm font-semibold">Händler &amp; Bestellung öffnen</CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          <div className="text-xs text-slate-500">
+            {dealerRestricted
+              ? "Es werden nur Händler aus deinem Gebiet angezeigt."
+              : "Admins sehen alle Händler. Kundennummer ist optional."}
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Input
+                value={dealerQuery}
+                onChange={(e) => setDealerQuery(e.target.value)}
+                placeholder="Händler suchen…"
+              />
+            </div>
+            <div className="space-y-2">
+              <Button className="w-full" onClick={handleStartOrder} disabled={!selectedDealer || dealerLoading}>
+                Ordertool anzeigen
+              </Button>
+              {dealerError ? <div className="text-xs text-rose-600">{dealerError}</div> : null}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="text-sm font-semibold">Ordertool</CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          {iframeSrc ? (
+            <div className="rounded-xl border border-slate-200 overflow-hidden">
+              <iframe
+                ref={iframeRef}
+                title="Ordertool"
+                src={iframeSrc}
+                className="h-[900px] w-full"
+              />
+            </div>
+          ) : (
+            <div className="text-xs text-slate-500">
+              Bitte Händler auswählen und „Ordertool anzeigen“ klicken, um die Bestellung hier zu öffnen.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="text-sm font-semibold">Hinweise</CardHeader>
+        <CardContent className="text-xs text-slate-600 space-y-2">
+          <p>
+            Für Tests kannst du weiterhin die Dummy-Lagerbestände und HTML-Templates aus der Admin-Ansicht laden.
+          </p>
+          <p>
+            Händlername und Kundennummer werden beim Öffnen des Ordertools automatisch übernommen, wenn sie hier
+            eingegeben wurden.
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }
