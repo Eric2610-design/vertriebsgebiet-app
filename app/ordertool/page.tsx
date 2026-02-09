@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { Suspense, useMemo, useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { Badge, Card, CardContent, CardHeader, Select } from "@/components/ui";
 
@@ -9,7 +9,7 @@ function MarketBadge({ market }: { market: "DE_AT" | "CH" }) {
   return <Badge tone="emerald">DE/AT</Badge>;
 }
 
-export default function OrdertoolPage() {
+function OrdertoolContent() {
   const [market, setMarket] = useState<"DE_AT" | "CH">("DE_AT");
   const searchParams = useSearchParams();
   const [ready, setReady] = useState(false);
@@ -82,5 +82,13 @@ export default function OrdertoolPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function OrdertoolPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-slate-600">Ordertool lädt…</div>}>
+      <OrdertoolContent />
+    </Suspense>
   );
 }
