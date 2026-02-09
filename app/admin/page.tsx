@@ -7,6 +7,18 @@ import { Pictogram } from "@/components/Pictogram";
 import RequireRole from "@/components/RequireRole";
 
 type SettingRow = { key: string; value: any; updated_at?: string };
+type AttributeRule = {
+  attribute: string;
+  match: string;
+  minQty: number;
+  factor: number;
+  active: boolean;
+};
+type AttributeRuleSettings = {
+  version: number;
+  rules: AttributeRule[];
+};
+
 
 export default function AdminPage() {
   const [months, setMonths] = useState<string>("18");
@@ -17,6 +29,11 @@ export default function AdminPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [manus, setManus] = useState<any[]>([]);
   const [groups, setGroups] = useState<any[]>([]);
+  const [attributes, setAttributes] = useState<Record<string, string[]>>({});
+  const [attributeRules, setAttributeRules] = useState<AttributeRule[]>([]);
+  const [rulesMsg, setRulesMsg] = useState<string>("");
+  const [rulesLoading, setRulesLoading] = useState(false);
+  const [rulesSaving, setRulesSaving] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -46,10 +63,22 @@ export default function AdminPage() {
           setManus(mJ?.items ?? []);
           setGroups(gJ?.items ?? []);
         }
+
+        if (alive) setRulesLoading(true);
+        const rulesRes = await fetch("/api/ordertool/data", { cache: "no-store" });
+        const rulesJson = await rulesRes.json().catch(() => ({}));
+        if (alive) {
+          setAttributes(rulesJson?.attributes ?? {});
+          setAttributeRules(rulesJson?.rules ?? []);
+          setRulesLoading(false);
+        }
       } catch {
         // ignore
       } finally {
-        if (alive) setLoading(false);
+        if (alive) {
+          setLoading(false);
+          setRulesLoading(false);
+        }
       }
     })();
     return () => {
@@ -116,6 +145,50 @@ export default function AdminPage() {
       setMsg(e?.message ?? "Speichern fehlgeschlagen");
     } finally {
       setSaving(false);
+    }
+  }
+
+  function updateRule(idx: number, patch: Partial<AttributeRule>) {
+    setAttributeRules((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  }
+
+  function removeRule(idx: number) {
+    setAttributeRules((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function addRule() {
+    const nextAttribute = Object.keys(attributes)[0] ?? "motor";
+    const nextMatch = attributes[nextAttribute]?.[0] ?? "";
+    setAttributeRules((prev) => [
+      ...prev,
+      { attribute: nextAttribute, match: nextMatch, minQty: 10, factor: 2.5, active: true },
+    ]);
+  }
+
+  async function saveRules() {
+    setRulesMsg("");
+    setRulesSaving(true);
+    try {
+      const payload: AttributeRuleSettings = {
+        version: 1,
+        rules: attributeRules.map((r) => ({
+          ...r,
+          minQty: Number.isFinite(Number(r.minQty)) ? Math.max(1, Math.floor(Number(r.minQty))) : 1,
+          factor: Number.isFinite(Number(r.factor)) ? Number(r.factor) : 1,
+          active: !!r.active,
+        })),
+      };
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key: "ordertool_attribute_rules_v1", value: payload }),
+      });
+      if (!res.ok) throw new Error("Speichern fehlgeschlagen.");
+      setRulesMsg("Gespeichert.");
+    } catch (e: any) {
+      setRulesMsg(e?.message ?? "Speichern fehlgeschlagen.");
+    } finally {
+      setRulesSaving(false);
     }
   }
 
@@ -194,6 +267,110 @@ export default function AdminPage() {
           <div className="text-xs text-slate-500">
             Hinweis: Diese Einstellung beeinflusst nur den Vorschlag in der Import-Klärliste. Du kannst jeden Händler dort trotzdem manuell auf aktiv/ehemalig/ignorieren setzen.
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader className="flex items-center justify-between">
+          <div>
+            <div className="font-medium">Ordertool: Attribut-Regeln</div>
+            <div className="text-sm text-slate-600">
+              Wenn Attribut X = Y, dann gelten Schwellen/Kalkulationen Z.
+            </div>
+          </div>
+          <Badge className="ml-3">{rulesLoading ? "lädt…" : "bereit"}</Badge>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={addRule}>
+              + Regel
+            </Button>
+            <Button onClick={saveRules} disabled={rulesSaving}>
+              {rulesSaving ? "Speichert…" : "Speichern"}
+            </Button>
+          </div>
+
+          <div className="space-y-2">
+            {attributeRules.length ? (
+              attributeRules.map((rule, idx) => {
+                const values = attributes[rule.attribute] ?? [];
+                return (
+                  <div key={`${rule.attribute}-${idx}`} className="rounded-xl border p-3 space-y-2">
+                    <div className="flex flex-wrap gap-2 items-end">
+                      <div className="min-w-[160px]">
+                        <label className="text-xs text-slate-500">Attribut</label>
+                        <Select
+                          value={rule.attribute}
+                          onChange={(e) =>
+                            updateRule(idx, {
+                              attribute: e.target.value,
+                              match: attributes[e.target.value]?.[0] ?? "",
+                            })
+                          }
+                        >
+                          {Object.keys(attributes).map((attr) => (
+                            <option key={attr} value={attr}>
+                              {attr}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+
+                      <div className="min-w-[200px]">
+                        <label className="text-xs text-slate-500">Wert</label>
+                        <Select value={rule.match} onChange={(e) => updateRule(idx, { match: e.target.value })}>
+                          <option value="">Wert wählen…</option>
+                          {values.map((val) => (
+                            <option key={val} value={val}>
+                              {val}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+
+                      <div className="w-32">
+                        <label className="text-xs text-slate-500">Mindestmenge</label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={rule.minQty}
+                          onChange={(e) => updateRule(idx, { minQty: Number(e.target.value) })}
+                        />
+                      </div>
+
+                      <div className="w-32">
+                        <label className="text-xs text-slate-500">Kalkulation</label>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          min={0}
+                          value={rule.factor}
+                          onChange={(e) => updateRule(idx, { factor: Number(e.target.value) })}
+                        />
+                      </div>
+
+                      <label className="flex items-center gap-2 text-sm text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={rule.active}
+                          onChange={(e) => updateRule(idx, { active: e.target.checked })}
+                        />
+                        aktiv
+                      </label>
+
+                      <Button variant="secondary" onClick={() => removeRule(idx)}>
+                        Entfernen
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="text-sm text-slate-600">Noch keine Regeln vorhanden.</div>
+            )}
+          </div>
+
+          {rulesMsg ? <div className="text-sm text-slate-700">{rulesMsg}</div> : null}
         </CardContent>
       </Card>
 
