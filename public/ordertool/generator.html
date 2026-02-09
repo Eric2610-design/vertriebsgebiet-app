@@ -346,6 +346,8 @@ const tblBody=document.querySelector('#tbl tbody');
 const readyDot=$('readyDot'), readyTxt=$('readyTxt');
 const maxQtyInput=$('maxQty');
 const validUntilInput=$('validUntil');
+let ADMIN_MAX_QTY = null;
+let FREE_STOCK_HEADER_OVERRIDE = '';
 
 const kpiTotal=$('kpiTotal'), kpiBosch=$('kpiBosch'), kpiPana=$('kpiPana');
 const insightsHint=$('insightsHint');
@@ -424,6 +426,18 @@ function _numAny(x){
 
 // --- geplante Menge aus Quelle (Excel Spalten AD–AR) ---
 // Spalten AD..AR entsprechen 0-basiert 29..43. Quelle wird als __C{idx}__ gespeichert.
+function resolveFreeStockHeader(headers){
+  const override = String(FREE_STOCK_HEADER_OVERRIDE || "").trim();
+  if (override && headers && headers.includes(override)) return override;
+  return pickHeader(headers, -1, ['freier','verfügbarer','bestand'], 'Freier verfügbarer Bestand');
+}
+
+function freeStockFromRow(r){
+  const header = (__HDR && __HDR.stockNow) ? __HDR.stockNow : null;
+  if (header && r && r[header] !== undefined) return Math.max(0, _numAny(r[header]));
+  return Math.max(0, _numAny(r.__C23__));
+}
+
 function plannedFromRow(r){
   // Spalten AD–AR (zu produzierende Mengen). In der Ansicht "zu bauen" wird
   // der aktuell freie Bestand (Spalte X) abgezogen. Negative Werte werden nicht angezeigt.
@@ -432,15 +446,15 @@ function plannedFromRow(r){
     const v = _numAny(r[`__C${c}__`]);
     sum += Math.max(0, v);
   }
-  const free = Math.max(0, _numAny(r.__C23__)); // Spalte X
+  const free = freeStockFromRow(r);
   const net = Math.trunc(sum - free);
   return net > 0 ? net : 0;
 }
 
 function stockNowFromRow(r){
-  // Lagernd = freier verfügbarer Bestand aus Spalte X (Excel) => __C23__
+  // Lagernd = freier verfügbarer Bestand (konfigurierbare Spalte).
   // Nur positive Werte zählen, negative/leer => 0
-  return Math.max(0, _numAny(r.__C23__));
+  return freeStockFromRow(r);
 }
 
 
@@ -474,7 +488,7 @@ function _setOptions(sel, values, firstLabel){
 function resolveHeaders(headers){
   // Map generator-insights fields to actual column headers in the Quelle.
   // We try multiple token combinations because the exports change often.
-  const stockNow = pickHeader(headers, -1, ['freier','verfügbarer','bestand'], 'Freier verfügbarer Bestand');
+  const stockNow = resolveFreeStockHeader(headers);
   const motorHerst = pickHeader(headers, -1, ['motor','hersteller'], 'Motor Hersteller FLYER');
   const motorType  = pickHeader(headers, -1, ['motor','typ'], 'Motortyp FLYER');
 
@@ -698,7 +712,7 @@ async function loadInsightsFromSource(){
       // - UND (freier Bestand > 0 ODER geplant > 0 in AD–AR)
       const art = String(r.__C3__ ?? '').replace(/\D/g,'');
       if(!art) return false;
-      const freeStock = Math.max(0, _numAny(r.__C23__));
+      const freeStock = freeStockFromRow(r);
       const planned = plannedFromRow(r);
       return (freeStock > 0) || (planned > 0);
     });
@@ -707,7 +721,8 @@ async function loadInsightsFromSource(){
     // init cascading filters (options depend on previous selections)
     rebuildInsightsFilterOptions();
 
-    insightsHint.textContent = 'Quelle geladen: '+rows.length.toLocaleString('de-DE')+' Zeilen, davon '+eligible.length.toLocaleString('de-DE')+' relevant (Artikelnummer Spalte D vorhanden & freier Bestand Spalte X > 0).';
+    const freeCol = (__HDR && __HDR.stockNow) ? __HDR.stockNow : 'Spalte X';
+    insightsHint.textContent = 'Quelle geladen: '+rows.length.toLocaleString('de-DE')+' Zeilen, davon '+eligible.length.toLocaleString('de-DE')+' relevant (Artikelnummer Spalte D vorhanden & freier Bestand ' + freeCol + ' > 0).';
     refreshInsights();
 
   }catch(e){
@@ -727,13 +742,37 @@ function readMaxQty(){
   if(!Number.isFinite(v) || v<1) return 20;
   return Math.min(999, v);
 }
+async function loadAdminSettings(){
+  try{
+    const [maxRes, freeRes] = await Promise.all([
+      fetch('/api/settings?key=ordertool_max_qty', {cache:'no-store'}),
+      fetch('/api/settings?key=ordertool_free_stock_column', {cache:'no-store'})
+    ]);
+    const maxJson = await maxRes.json().catch(()=>({}));
+    const freeJson = await freeRes.json().catch(()=>({}));
+    const maxVal = maxJson?.setting?.value ?? maxJson?.value;
+    const freeVal = freeJson?.setting?.value ?? freeJson?.value;
+    const maxNum = Math.trunc(Number(maxVal));
+    if(Number.isFinite(maxNum) && maxNum>0) ADMIN_MAX_QTY = Math.min(999, maxNum);
+    if(typeof freeVal === 'string') FREE_STOCK_HEADER_OVERRIDE = freeVal.trim();
+  }catch(e){}
+}
 function initMaxQty(){
   const saved = localStorage.getItem('flyer_maxQty');
   const v = Math.trunc(Number(saved));
-  maxQtyInput.value = (Number.isFinite(v) && v>=1) ? String(Math.min(999, v)) : '20';
-  maxQtyInput.addEventListener('input', ()=>{
-    localStorage.setItem('flyer_maxQty', String(readMaxQty()));
-  });
+  const pick = (Number.isFinite(ADMIN_MAX_QTY) && ADMIN_MAX_QTY)
+    ? ADMIN_MAX_QTY
+    : ((Number.isFinite(v) && v>=1) ? Math.min(999, v) : 20);
+  maxQtyInput.value = String(pick);
+  if (Number.isFinite(ADMIN_MAX_QTY) && ADMIN_MAX_QTY) {
+    maxQtyInput.disabled = true;
+    maxQtyInput.title = 'Global im Admin-Bereich definiert.';
+  } else {
+    maxQtyInput.disabled = false;
+    maxQtyInput.addEventListener('input', ()=>{
+      localStorage.setItem('flyer_maxQty', String(readMaxQty()));
+    });
+  }
 }
 // --- validity (valid until) ---
 function _isoTodayPlus(days){
@@ -778,9 +817,10 @@ function slug(s){
 }
 function bucketAvail(q){
   const n = Math.max(0, Math.trunc(Number(q)||0));
-  if (n<=10) return String(n);
-  if (n<=49) return "10+";
-  if (n<=100) return "49+";
+  if (n<=0) return "0";
+  if (n<10) return String(n);
+  if (n<49) return "10+";
+  if (n<100) return "49+";
   return "100+";
 }
 const MONTH_MAP = {
@@ -905,9 +945,11 @@ srcFile.addEventListener('change', ()=>{ loadInsightsFromSource(); });
 if(breakBy) breakBy.addEventListener('change', refreshInsights);
 [outDE,outCH].forEach(inp=>inp && inp.addEventListener('change', ()=>{clearDL(); syncReady();}));
 resetDefaults();
-initMaxQty();
 initValidUntil();
-loadInsightsFromSource();
+loadAdminSettings().finally(()=>{
+  initMaxQty();
+  loadInsightsFromSource();
+});
 
 async function readXlsx(file){
   const buf = await file.arrayBuffer();
@@ -1029,6 +1071,7 @@ function buildTiles(srcHeaders, srcRows, ruleMap, ekMap, mode, chEkMap, chFixMap
   const H = (name)=>name; // readability
 
   const monthCols = pickMonths(srcHeaders);
+  const freeStockHeader = resolveFreeStockHeader(srcHeaders);
   const groups = new Map();
   // missing EK tolerated (no abort)
   const missingEkArts = new Set();
@@ -1053,9 +1096,6 @@ for(const r of srcRows){
     const bez = String(r[H('Basisartikelbezeichnung')]||'').trim();
     if(!bez) continue;
 
-    const availTotal = Number(String(r[H('Freier verfügbarer Bestand inkl. Produktionsvorschläge u. -aufträge')]||0).replace(',','.')) || 0;
-    if(availTotal<=0) continue;
-
     const year = Math.trunc(Number(r[H('Modelljahr')]||0) || 0);
     const famSrc = String(r[H('Serie/Familie')]||'').trim();
     const motor = String(r[H('Motor Hersteller FLYER')]||'').trim();
@@ -1068,7 +1108,7 @@ for(const r of srcRows){
     const batteryRaw = String(r[H('Akkustärke')]||'');
     const bat = Math.trunc(Number((batteryRaw.match(/(\d{3,4})/)||[])[1]||0) || 0);
 
-    const xNow = _toNumber(r[H('Freier verfügbarer Bestand')]||0) || 0;
+    const xNow = _toNumber(r[freeStockHeader]||0) || 0;
 
 // Für die maximale bestellbare Menge verwenden wir den gesamten verfügbaren + geplanten Bestand
 // (Summe über alle Monatsspalten). Damit sind Zukunftsmodelle nicht auf 0 limitiert.

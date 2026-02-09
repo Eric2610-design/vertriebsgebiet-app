@@ -287,7 +287,7 @@
 </div>
 <div class="wrap">
   <div class="headRow">
-    <h1 id="lblTitle">FLYER Ordertool</h1>
+    <h1 id="lblTitle">Ordertool</h1>
         <div class="marketPanel" title="Land / Pays">
       <button class="mflag" id="btnMarketDE" aria-label="Deutschland"><svg viewBox="0 0 3 2" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect width="3" height="2" fill="#FFCE00"/><rect width="3" height="1.3333333" y="0" fill="#DD0000"/><rect width="3" height="0.6666667" y="0" fill="#000000"/></svg></button>
       <button class="mflag" id="btnMarketCH" aria-label="Schweiz"><svg viewBox="0 0 28 20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect width="28" height="20" fill="#D52B1E"/><rect x="11" y="4" width="6" height="12" fill="#FFFFFF"/><rect x="8" y="7" width="12" height="6" fill="#FFFFFF"/></svg></button>
@@ -441,7 +441,7 @@ const I18N = {
     cart_bosch_kalk: 'Kalk Bosch',
     cart_pana_kalk: 'Kalk Panasonic',
     exportBtn: 'Bestellung abschicken',
-    exportTitle: 'Erstellt eine CSV-Datei zur Bestellung',
+    exportTitle: 'Erstellt eine CAB-Datei zur Bestellung',
     footHint: 'Nur Positionen mit Menge > 0 werden exportiert.',
         expiredTitle: 'Datei abgelaufen',
     expiredBody: 'Diese Datei ist nicht mehr gültig.',
@@ -477,7 +477,7 @@ const I18N = {
     cart_bosch_kalk: 'Calc Bosch',
     cart_pana_kalk: 'Calc Panasonic',
     exportBtn: 'Envoyer la commande',
-    exportTitle: 'Crée un fichier CSV pour la commande',
+    exportTitle: 'Crée un fichier CAB pour la commande',
     footHint: 'Seules les positions avec quantité > 0 sont exportées.',
         expiredTitle: 'Fichier expiré',
     expiredBody: 'Ce fichier n\'est plus valable.',
@@ -581,9 +581,9 @@ function val(id){ const el=document.getElementById(id); return el ? (el.value ??
 function bucketAvail(n){
   n = parseInt(n||'0',10)||0;
   if(n<=0) return '0';
-  if(n<=10) return String(n);
-  if(n<=49) return '10+';
-  if(n<=100) return '49+';
+  if(n<10) return String(n);
+  if(n<49) return '10+';
+  if(n<100) return '49+';
   return '100+';
 }
 
@@ -1097,7 +1097,7 @@ function exportOrder() {
     o.battery||'',
     o.preisart||''
   ].map(x=>String(x).replace(/;/g,',')).join(';')));
-  const blob=new Blob([rows.join('\n')], {type:'text/csv;charset=utf-8'});
+  const blob=new Blob([rows.join('\n')], {type:'application/octet-stream'});
   const a=document.createElement('a');
   const stamp=new Date().toISOString().slice(0,10);
   a.href=URL.createObjectURL(blob);
@@ -1112,7 +1112,7 @@ function exportOrder() {
   if(_cname) _parts.push(_cname);
   _parts.push("FlyerOrder");
   const _base = _parts.join("_");
-  a.download=`${_base}_${stamp}.csv`;
+  a.download=`${_base}_${stamp}.cab`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -1537,7 +1537,7 @@ updateEkChips();
           updateCartUI();
   
 }
-// v46: Warenkorb-Übersicht in neuem Fenster (immer kompletter Warenkorb) + Gesamtmenge + CSV Button
+// v46: Warenkorb-Übersicht in neuem Fenster (immer kompletter Warenkorb) + Gesamtmenge + CAB Button
 function openCartOverviewWindow(){
   const qtyInputs = cartInputs();
   if(!qtyInputs.length){ showToast('Keine Mengen im Warenkorb.'); return; }
@@ -1690,7 +1690,7 @@ function openCartOverviewWindow(){
           </div>
         </div>
         <div class="actions">
-          <button class="btn primary" onclick="try{window.opener.exportOrder();}catch(e){alert('Bestellen nicht möglich.');}">Bestellen (CSV)</button>
+          <button class="btn primary" onclick="try{window.opener.exportOrder();}catch(e){alert('Bestellen nicht möglich.');}">Bestellen (CAB)</button>
           <button class="btn" onclick="window.print()">Drucken</button>
           <button class="btn" onclick="window.close()">Schließen</button>
         </div>
@@ -1960,7 +1960,7 @@ document.addEventListener('DOMContentLoaded', init);
   <div class="actionFooter" id="actionFooter" aria-label="Aktionen">
     <button class="btn secondary" id="saveBtn" title="Speichert deine Eingaben lokal auf diesem Gerät">Speichern</button>
     <button class="btn danger" id="clearBtn" title="Setzt alle Mengen zurück">Alles löschen</button>
-    <button class="btn" id="exportBtn" title="Erstellt eine CSV-Datei zur Bestellung">Bestellung abschicken</button>
+    <button class="btn" id="exportBtn" title="Erstellt eine CAB-Datei zur Bestellung">Bestellung abschicken</button>
   </div>
 
 
@@ -1968,9 +1968,12 @@ document.addEventListener('DOMContentLoaded', init);
 <script>
 (function(){
   const LS_KEY = "FLYER_ORDER_AUTOSAVE_V1_" + ((localStorage.getItem("flyer_market")||"DE")==="CH" ? "CH" : "DE"); // reuse existing key
+  const ORDER_STORE_KEY = "FLYER_ORDERTOOL_ORDERS_V1";
+  const PREFILL_KEY = "FLYER_ORDERTOOL_PREFILL_V1";
   const META_FIELDS = ["family","model","year","motor","frame","color","size","uvp","battery","preisart","preislabel","tile","max","ekbase"];
 
-  let state = { v: 2, savedAt: "", dealerName: "", customerNo: "", cart: {} };
+  let state = { v: 2, savedAt: "", dealerId: "", dealerName: "", customerNo: "", cart: {} };
+  let prefill = null;
   let applying = false;
   let saveTimer = null;
 
@@ -1990,12 +1993,61 @@ document.addEventListener('DOMContentLoaded', init);
   function normDigits(x){
     return String(x||"").replace(/\D+/g,"").replace(/^0+/,"") || "";
   }
+  function safeStoreParse(){
+    try{
+      const raw = localStorage.getItem(ORDER_STORE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      const open = parsed && typeof parsed.open === "object" ? parsed.open : {};
+      const archive = parsed && typeof parsed.archive === "object" ? parsed.archive : {};
+      return { open, archive };
+    }catch(_){
+      return { open: {}, archive: {} };
+    }
+  }
+  function writeStore(store){
+    try{
+      localStorage.setItem(ORDER_STORE_KEY, JSON.stringify(store));
+    }catch(_){}
+  }
+  function dealerKey(){
+    return String(state.dealerId || state.dealerName || "unbekannt").trim();
+  }
+  function syncOrderStore(status){
+    const key = dealerKey();
+    if(!key) return;
+    const items = Object.values(state.cart).reduce((a,o)=>a + (o && o.q>0 ? 1 : 0), 0);
+    const qty = Object.values(state.cart).reduce((a,o)=>a + (o && o.q>0 ? o.q : 0), 0);
+    const summary = {
+      dealerKey: key,
+      dealerId: state.dealerId || "",
+      dealerName: state.dealerName || "",
+      customerNo: state.customerNo || "",
+      items,
+      qty,
+      updatedAt: state.savedAt || nowIso(),
+      status
+    };
+    const store = safeStoreParse();
+    if(status === "submitted"){
+      const list = store.archive[key] || [];
+      list.unshift(summary);
+      store.archive[key] = list;
+      delete store.open[key];
+    } else {
+      store.open[key] = summary;
+    }
+    writeStore(store);
+  }
 
   function load(){
     const raw = localStorage.getItem(LS_KEY);
     if(!raw) return;
     const obj = safeParse(raw);
     if(!obj) return;
+
+    if(prefill === null){
+      prefill = safeParse(localStorage.getItem(PREFILL_KEY) || "");
+    }
 
     // migrate older shapes
     const cart = {};
@@ -2018,6 +2070,7 @@ document.addEventListener('DOMContentLoaded', init);
 
     state.v = 2;
     state.savedAt = obj.savedAt || obj.saved_at || obj.ts || "";
+    state.dealerId = obj.dealerId || "";
     state.dealerName = obj.dealerName || obj.dealer || "";
     state.customerNo = obj.customerNo || obj.customer || "";
     state.cart = cart;
@@ -2037,15 +2090,48 @@ document.addEventListener('DOMContentLoaded', init);
       // also store dealer fields from UI if present
       const dn = document.getElementById("dealerName");
       const cn = document.getElementById("customerNo");
+      if(prefill === null){
+        prefill = safeParse(localStorage.getItem(PREFILL_KEY) || "");
+      }
+      if(prefill && typeof prefill === "object" && prefill.dealerId){
+        state.dealerId = String(prefill.dealerId || "").trim();
+      }
       if(dn) state.dealerName = String(dn.value||"").trim();
       if(cn) state.customerNo = String(cn.value||"").trim();
       localStorage.setItem(LS_KEY, JSON.stringify(state));
       writeBadge();
+      syncOrderStore("open");
     }catch(_){}
   }
   function persistDebounced(){
     clearTimeout(saveTimer);
     saveTimer = setTimeout(persistNow, 180);
+  }
+
+  function applyPrefill(){
+    if(prefill === null){
+      prefill = safeParse(localStorage.getItem(PREFILL_KEY) || "");
+    }
+    if(!prefill || typeof prefill !== "object") return;
+    const dn = document.getElementById("dealerName");
+    const cn = document.getElementById("customerNo");
+    let changed = false;
+    if(dn && !String(dn.value || "").trim() && prefill.dealerName){
+      dn.value = String(prefill.dealerName || "").trim();
+      changed = true;
+    }
+    if(cn && !String(cn.value || "").trim() && prefill.customerNo){
+      cn.value = String(prefill.customerNo || "").trim();
+      changed = true;
+    }
+    if(prefill.dealerId){
+      state.dealerId = String(prefill.dealerId || "").trim();
+    }
+    if(changed){
+      persistNow();
+    } else {
+      syncOrderStore("open");
+    }
   }
 
   function keyFromEl(el){
@@ -2219,7 +2305,7 @@ document.addEventListener('DOMContentLoaded', init);
     };
 
     // export uses cart store, so it works even if filtered
-      // Export: CSV enthält EK_eff (nach Schwelle) und Lieferung (sofort / Monat)
+      // Export: CAB enthält EK_eff (nach Schwelle) und Lieferung (sofort / Monat)
   window.exportOrder = function(){
     const dealer = (document.getElementById("dealerName")?.value || "").trim();
     const customer = (document.getElementById("customerNo")?.value || "").trim();
@@ -2315,7 +2401,7 @@ document.addEventListener('DOMContentLoaded', init);
     ].join(";")));
 
     const csv = rows.join("\n");
-    const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
+    const blob = new Blob([csv], {type:"application/octet-stream"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -2337,12 +2423,13 @@ document.addEventListener('DOMContentLoaded', init);
     if(_cname) _parts.push(_cname);
     _parts.push("FlyerOrder");
     const _base = _parts.join("_");
-    a.download = _base + "_" + yyyy + "-" + mm + "-" + dd + ".csv";
+    a.download = _base + "_" + yyyy + "-" + mm + "-" + dd + ".cab";
 
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(()=>URL.revokeObjectURL(url), 5000);
+    syncOrderStore("submitted");
   };
 
     // clear button should clear full cart store
@@ -2398,6 +2485,7 @@ document.addEventListener('DOMContentLoaded', init);
 
   function init(){
     load();
+    applyPrefill();
     writeBadge();
     hookDealerFields();
     overrideComputations();

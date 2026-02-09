@@ -167,6 +167,14 @@ export default function AdminPage() {
               <Link href="/admin/geo-merge/overview"><Button className="mt-3" variant="secondary">Öffnen</Button></Link>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-sm font-semibold">Ordertool · Einstellungen</div>
+              <div className="text-xs text-slate-600 mt-1">Globale Bestellmengen & Quellen-Spalten.</div>
+              <Link href="/admin/ordertool-settings"><Button className="mt-3" variant="secondary">Öffnen</Button></Link>
+            </CardContent>
+          </Card>
         </div>
 
       <Card>
