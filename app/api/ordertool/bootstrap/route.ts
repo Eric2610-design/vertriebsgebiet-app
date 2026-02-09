@@ -183,7 +183,8 @@ function parseMonthLabelToIso(label: string): string | null {
 }
 
 function computeEtaMonth(plan: any): string | null {
-  const items: { label: string; qty: number }[] = Array.isArray(plan) ? plan : [];
+  // Be tolerant: older snapshots may use `amount` instead of `qty`.
+  const items: { label?: string; qty?: number; amount?: number }[] = Array.isArray(plan) ? plan : [];
   let best: { ym: string; key: number } | null = null;
 
   for (const it of items) {
