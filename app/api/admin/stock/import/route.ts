@@ -121,6 +121,16 @@ export async function POST(req: Request) {
       .select("id")
       .single();
 
+    if (runRes.error || !runRes.data) {
+      const message = runRes.error?.message || "Snapshot konnte nicht angelegt werden";
+      if (message.includes("schema cache") || message.includes("stock_runs")) {
+        return bad(
+          "Die Tabelle 'stock_runs' fehlt oder der Supabase Schema-Cache ist veraltet. Bitte Migration 006_stock_snapshot.sql ausführen und den Schema-Cache in Supabase neu laden.",
+          500
+        );
+      }
+      return bad(message, 500);
+    }
     if (runRes.error || !runRes.data) return bad(runRes.error?.message || "Snapshot konnte nicht angelegt werden", 500);
 
     const runId = runRes.data.id as string;
@@ -128,6 +138,16 @@ export async function POST(req: Request) {
 
     for (const batch of chunk(withRun, 500)) {
       const insertRes = await supabase.from("stock_items").insert(batch);
+      if (insertRes.error) {
+        const message = insertRes.error.message;
+        if (message.includes("schema cache") || message.includes("stock_items")) {
+          return bad(
+            "Die Tabelle 'stock_items' fehlt oder der Supabase Schema-Cache ist veraltet. Bitte Migration 006_stock_snapshot.sql ausführen und den Schema-Cache in Supabase neu laden.",
+            500
+          );
+        }
+        return bad(message, 500);
+      }
       if (insertRes.error) return bad(insertRes.error.message, 500);
     }
 

@@ -16,6 +16,7 @@ export default function StockImportPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const showSchemaHint = err?.includes("Schema-Cache") || err?.includes("stock_runs") || err?.includes("stock_items");
 
   const preview = useMemo(() => rows.slice(0, 8), [rows]);
 
@@ -93,6 +94,12 @@ export default function StockImportPage() {
             </div>
 
             {err ? <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{err}</div> : null}
+            {showSchemaHint ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                Hinweis: Bitte die Migration <span className="font-semibold">006_stock_snapshot.sql</span> ausführen und
+                anschließend den Supabase Schema-Cache neu laden. Danach erneut importieren.
+              </div>
+            ) : null}
             {msg ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">{msg}</div> : null}
 
             {preview.length ? (
