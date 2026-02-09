@@ -39,6 +39,23 @@ export default function OrdertoolPage() {
   const [dealerRestricted, setDealerRestricted] = useState(false);
 
   useEffect(() => {
+    try {
+      const stored = localStorage.getItem("FLYER_ORDERTOOL_PREFILL_V1");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setDealerQuery(parsed?.dealerName ?? "");
+        setCustomerNo(parsed?.customerNo ?? "");
+        setSelectedDealerId(parsed?.dealerId ?? "");
+      }
+      const storedMarket = localStorage.getItem("flyer_market");
+      if (storedMarket === "CH") setMarket("CH");
+      if (storedMarket === "DE") setMarket("DE_AT");
+    } catch {
+      // ignore invalid local storage
+    }
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     const loadDealers = async () => {
       try {
@@ -130,15 +147,31 @@ export default function OrdertoolPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <MarketBadge market={market} />
-          <Select
-            value={market}
-            onChange={(e) => setMarket(e.target.value as Market)}
-            className="h-10 w-36 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-900"
-          >
-            <option value="DE_AT">🇩🇪 DE / AT</option>
-            <option value="CH">🇨🇭 CH</option>
-          </Select>
+          <div className="min-w-[220px]">
+            <Input
+              value={dealerQuery}
+              onChange={(e) => setDealerQuery(e.target.value)}
+              placeholder="Händlername"
+            />
+          </div>
+          <div className="min-w-[200px]">
+            <Input
+              value={customerNo}
+              onChange={(e) => setCustomerNo(e.target.value)}
+              placeholder="Kundennummer (optional)"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <MarketBadge market={market} />
+            <Select
+              value={market}
+              onChange={(e) => setMarket(e.target.value as Market)}
+              className="h-10 w-36 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-900"
+            >
+              <option value="DE_AT">🇩🇪 DE / AT</option>
+              <option value="CH">🇨🇭 CH</option>
+            </Select>
+          </div>
         </div>
       </div>
 
@@ -151,11 +184,6 @@ export default function OrdertoolPage() {
               : "Admins sehen alle Händler. Kundennummer ist optional."}
           </div>
           <div className="space-y-2">
-            <Input
-              value={dealerQuery}
-              onChange={(e) => setDealerQuery(e.target.value)}
-              placeholder="Händler suchen…"
-            />
             <select
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
               value={selectedDealerId}
@@ -168,11 +196,6 @@ export default function OrdertoolPage() {
                 </option>
               ))}
             </select>
-            <Input
-              value={customerNo}
-              onChange={(e) => setCustomerNo(e.target.value)}
-              placeholder="Kundennummer (optional)"
-            />
             <Button className="w-full" onClick={handleStartOrder} disabled={!selectedDealer || dealerLoading}>
               Bestellung im Ordertool öffnen
             </Button>
