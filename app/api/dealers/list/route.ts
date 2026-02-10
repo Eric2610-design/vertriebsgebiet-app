@@ -12,7 +12,7 @@ export async function GET() {
     while (true) {
       let q = supabase
         .from("v_dealers_map")
-        .select(`id,name,street,zip,city,country_iso,phone,email,website,opening_hours,lat,lng,geocode_status,notes,created_at,updated_at,buying_group_key,sources,source_count`)
+        .select(`id,name,street,zip,city,country_iso,phone,email,website,opening_hours,lat,lng,geocode_status,created_at,updated_at,buying_group_key,sources,source_count`)
         .order("name", { ascending: true })
         .range(from, from + step - 1);
 
@@ -28,7 +28,7 @@ export async function GET() {
         const retry = await supabase
           .from("v_dealers_map")
           .select(`
-            id,name,street,zip,city,country,phone,email,website,opening_hours,lat,lng,geocode_status,notes,created_at,updated_at,
+            id,name,street,zip,city,country,phone,email,website,opening_hours,lat,lng,geocode_status,created_at,updated_at,
             buying_group_key,
             dealer_manufacturers!left(manufacturer_key)
           `)
