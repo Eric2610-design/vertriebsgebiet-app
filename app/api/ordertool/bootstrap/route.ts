@@ -22,6 +22,13 @@ type PricingThresholdSettings = {
   rules: PricingThresholdRule[];
 };
 
+
+type MaxQtySettings = {
+  version: number;
+  defaultMax: number;
+  overrides: Record<string, number>;
+};
+
 type PricingAttributeAction = "FIXPREIS" | "SONDERPREIS" | "SCHWELLE";
 type PricingAttributeRule = {
   id: string;
@@ -46,6 +53,7 @@ type FixpriceArticleSettings = {
     {
       motor?: string;
       isFixprice?: boolean;
+      ek?: number;
       source?: any;
     }
   >;
@@ -235,10 +243,11 @@ export async function GET(req: Request) {
   }
 
   // settings
-  const [thrRes, attrRes, fixRes] = await Promise.all([
-    supabase.from("app_settings").select("value").eq("key", "pricing_thresholds").maybeSingle(),
+  const [thrRes, attrRes, fixRes, maxQtyRes] = await Promise.all([
+supabase.from("app_settings").select("value").eq("key", "pricing_thresholds").maybeSingle(),
     supabase.from("app_settings").select("value").eq("key", "pricing_attribute_rules_v1").maybeSingle(),
     supabase.from("app_settings").select("value").eq("key", "fixprice_articles").maybeSingle(),
+    supabase.from("app_settings").select("value").eq("key", "ordertool_max_qty_v1").maybeSingle(),
   ]);
 
   const thresholds: PricingThresholdSettings = (thrRes.data?.value && Array.isArray(thrRes.data.value?.rules))
@@ -249,6 +258,10 @@ export async function GET(req: Request) {
   const attrRules: PricingAttributeRule[] = Array.isArray(attrSetting?.rules) ? attrSetting!.rules : [];
 
   const fixSetting: FixpriceArticleSettings | null = fixRes.data?.value ?? null;
+  const maxQtySetting: MaxQtySettings | null = maxQtyRes.data?.value ?? null;
+  const maxDefault = Number.isFinite(Number(maxQtySetting?.defaultMax)) ? Math.max(1, Math.floor(Number(maxQtySetting!.defaultMax))) : 40;
+  const maxOverrides = (maxQtySetting?.overrides && typeof maxQtySetting.overrides === "object") ? (maxQtySetting.overrides as Record<string, any>) : {};
+
   const fixMap = fixSetting?.byArticleNo ?? {};
 
   // items
@@ -339,7 +352,12 @@ export async function GET(req: Request) {
       avail_total,
       status,
       eta_month,
-      max_order_qty: avail_total,
+      ek_base: (Number.isFinite(Number((fixMap as any)?.[normalizeStr(it.sku)]?.ek)) ? Number((fixMap as any)[normalizeStr(it.sku)]?.ek) : null),
+      max_order_qty: Math.max(0, Math.min(avail_total, (() => {
+        const ov = Number((maxOverrides as any)[normalizeStr(it.sku)]);
+        const cfg = Number.isFinite(ov) && ov > 0 ? Math.floor(ov) : maxDefault;
+        return cfg;
+      })())),
       availability_plan: it.availability_plan ?? null,
       extra_thresholds,
     };

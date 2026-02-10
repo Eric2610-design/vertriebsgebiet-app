@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Card, CardContent, CardHeader, Button, Badge, Input, Textarea } from "@/components/ui";
+import { Card, CardContent, CardHeader, Button, Badge, Input, Textarea, Select } from "@/components/ui";
 import { DealerListPictos } from "@/components/DealerListPictos";
 
 type Summary = {
@@ -84,6 +84,8 @@ export default function RepClient({ email }: { email: string }) {
   const [data, setData] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  const [bgFilter, setBgFilter] = useState("");
+  const [sortBy, setSortBy] = useState<"name" | "buying_group" | "zip">("name");
 
   // placeholders
   const [lookbackDays, setLookbackDays] = useState<number>(90);
@@ -164,16 +166,47 @@ export default function RepClient({ email }: { email: string }) {
 
   const dealersFiltered = useMemo(() => {
     const query = q.trim().toLowerCase();
-    const list = data?.dealers ?? [];
-    if (!query) return list;
-    return list.filter((d) => `${d.name} ${d.zip ?? ""} ${d.city ?? ""}`.toLowerCase().includes(query));
-  }, [data, q]);
+    const list = (data?.dealers ?? []).slice();
+
+    const filtered = list.filter((d) => {
+      if (bgFilter && (d.buying_group_key ?? "") !== bgFilter) return false;
+      if (!query) return true;
+      return `${d.name} ${d.zip ?? ""} ${d.city ?? ""}`.toLowerCase().includes(query);
+    });
+
+    filtered.sort((a, b) => {
+      if (sortBy === "buying_group") {
+        const ka = a.buying_group_key ?? "";
+        const kb = b.buying_group_key ?? "";
+        const s = ka.localeCompare(kb, "de");
+        if (s !== 0) return s;
+      }
+      if (sortBy === "zip") {
+        const za = a.zip ?? "";
+        const zb = b.zip ?? "";
+        const s = za.localeCompare(zb, "de");
+        if (s !== 0) return s;
+      }
+      return a.name.localeCompare(b.name, "de");
+    });
+
+    return filtered;
+  }, [data, q, bgFilter, sortBy]);
 
   const territoryText = useMemo(() => {
     const ranges = data?.territories ?? [];
     if (!ranges.length) return "Keine Gebiete hinterlegt.";
     return ranges.map(fmtRange).join(" · ");
   }, [data]);
+
+  const buyingGroupOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of (data?.dealers ?? [])) {
+      if (d.buying_group_key) set.add(d.buying_group_key);
+    }
+    return Array.from(set).sort((a,b)=>a.localeCompare(b,"de"));
+  }, [data]);
+
 
   const dealerOptions = useMemo(() => {
     const list = (data?.dealers ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
@@ -310,7 +343,20 @@ export default function RepClient({ email }: { email: string }) {
           </CardHeader>
           <CardContent>
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Händler suchen…" />
-            <div className="mt-2 text-xs text-slate-500">Treffer: {dealersFiltered.length}</div>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <Select value={bgFilter} onChange={(e) => setBgFilter(e.target.value)}>
+                <option value="">Einkaufsverband: alle</option>
+                {buyingGroupOptions.map((k) => (
+                  <option key={k} value={k}>{k}</option>
+                ))}
+              </Select>
+              <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)}>
+                <option value="name">Sortierung: Name</option>
+                <option value="zip">Sortierung: PLZ</option>
+                <option value="buying_group">Sortierung: Einkaufsverband</option>
+              </Select>
+            </div>
+            <div className="mt-2 text-xs text-slate-500">Treffer: {dealersFiltered.length} / {(data?.dealers ?? []).length}</div>
             <div className="mt-2 max-h-[55vh] overflow-auto rounded-xl border border-slate-200 bg-white">
               {dealersFiltered.length === 0 ? (
                 <div className="p-3 text-sm text-slate-500">Keine Händler.</div>
@@ -336,7 +382,10 @@ export default function RepClient({ email }: { email: string }) {
                             <div className="mt-1 text-xs text-slate-500">Noch kein Besuch</div>
                           )}
                         </div>
-                        <Link href={`/dealer/${d.id}`} className="text-xs text-blue-700 underline">Öffnen</Link>
+                        <div className="flex flex-col items-end gap-1">
+                          <Link href={`/dealer/${d.id}`} className="text-xs text-blue-700 underline">Öffnen</Link>
+                          <Link href={`/ordertool?dealerId=${encodeURIComponent(d.id)}`} className="text-xs text-blue-700 underline">Bestellung starten</Link>
+                        </div>
                       </div>
                     </li>
                   ))}

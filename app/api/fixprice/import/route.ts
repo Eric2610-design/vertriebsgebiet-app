@@ -21,22 +21,28 @@ function isFixpriceFromPreisart(v: any): boolean {
   return s.length > 0;
 }
 
-function findColumns(rows: any[]): { articleKey: string; motorKey?: string; preisartKey?: string } | null {
+function findColumns(rows: any[]): { articleKey: string; motorKey?: string; preisartKey?: string; ekKey?: string } | null {
   if (!rows.length) return null;
   const keys = Object.keys(rows[0] ?? {});
   const lower = keys.map((k) => [k, k.toLowerCase()]);
-  const article = lower.find(([, l]) => l.includes("artikel") && l.includes("nummer"))?.[0]
-    ?? lower.find(([, l]) => l === "artikelnummer")?.[0]
-    ?? lower.find(([, l]) => l.includes("basisartikel"))?.[0];
+
+  const article =
+    lower.find(([, l]) => l.includes("artikel") && l.includes("nummer"))?.[0] ??
+    lower.find(([, l]) => l === "artikelnummer")?.[0] ??
+    lower.find(([, l]) => l.includes("basisartikel"))?.[0];
   if (!article) return null;
 
   const motor = lower.find(([, l]) => l === "motor" || l.includes("motor"))?.[0];
-  // Column E in your sheet is "Preisart" (Fixpreis/Sonderpreis/leer)
-  const preisart = lower.find(([, l]) => l.includes("preisart"))?.[0]
-    ?? lower.find(([, l]) => l.includes("fixpreis"))?.[0]
-    ?? lower.find(([, l]) => l.includes("sonderpreis"))?.[0];
+  // Column E in your sheet is usually "Preisart" (Fixpreis/Sonderpreis/leer)
+  const preisart =
+    lower.find(([, l]) => l.includes("preisart"))?.[0] ??
+    lower.find(([, l]) => l.includes("fixpreis"))?.[0] ??
+    lower.find(([, l]) => l.includes("sonderpreis"))?.[0];
 
-  return { articleKey: article, motorKey: motor, preisartKey: preisart };
+  // EK: Prefer a header containing EK/Einkauf; otherwise fall back to the 2nd column (= Spalte B).
+  const ek = lower.find(([, l]) => l === "ek" || l.includes("einkauf"))?.[0] ?? keys[1];
+
+  return { articleKey: article, motorKey: motor, preisartKey: preisart, ekKey: ek };
 }
 
 export async function POST(req: Request) {
@@ -65,7 +71,7 @@ export async function POST(req: Request) {
     return bad(e?.message ?? "xlsx_parse_failed", 400);
   }
 
-  const byArticleNo: Record<string, { motor?: string; isFixprice: boolean }> = {};
+  const byArticleNo: Record<string, { motor?: string; isFixprice: boolean; ek?: number }> = {};
   let usedSheet: string | null = null;
   let totalRows = 0;
 
@@ -95,7 +101,11 @@ export async function POST(req: Request) {
       const preisartVal = cols.preisartKey ? r[cols.preisartKey] : "";
       const isFix = isFixpriceFromPreisart(preisartVal);
 
-      byArticleNo[art] = { motor, isFixprice: isFix };
+      const ekRaw = cols.ekKey ? r[cols.ekKey] : "";
+      const ekNum = Number(String(ekRaw ?? "").replace(/\s/g, "").replace(",", "."));
+      const ek = Number.isFinite(ekNum) && ekNum > 0 ? ekNum : undefined;
+
+      byArticleNo[art] = { motor, isFixprice: isFix, ek };
       totalRows += 1;
     }
     break; // first matching sheet wins

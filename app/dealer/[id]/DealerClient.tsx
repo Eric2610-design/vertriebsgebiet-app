@@ -628,6 +628,7 @@ Hinweis: ${sameZipForce ? "FORCE aktiv (ignoriert Adresse/Land/PLZ-Checks)." : "
               Aus Verband entfernen
             </Button>
           ) : null}
+          <Link href={`/ordertool?dealerId=${encodeURIComponent(d.id)}`}><Button variant="secondary">Bestellung starten</Button></Link>
           <Link href="/map"><Button variant="secondary">Zur Karte</Button></Link>
           <Link href="/admin/cleanup"><Button variant="secondary">Cleanup</Button></Link>
           <Link href="/admin/buying-groups"><Button variant="secondary">Einkaufsverbände</Button></Link>

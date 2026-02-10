@@ -17,7 +17,23 @@ export function DealerListPictos({
   className?: string;
 }) {
   const keys = (manufacturerKeys ?? []).filter(Boolean);
-  const left = keys.slice(0, maxManufacturers);
+
+  // Wichtig: Flyer soll nie aus Versehen durch andere Icons (z.B. Cube) ersetzt werden.
+  // Daher sortieren wir die Hersteller-Keys stabil mit einer kleinen Prioritätenliste.
+  const PREF = ["flyer", "riese_mueller", "bergamont", "kalkhoff", "ktm", "cube", "scott"];
+  const prefIndex = (k: string) => {
+    const i = PREF.indexOf(k);
+    return i === -1 ? 999 : i;
+  };
+
+  const left = [...keys]
+    .sort((a, b) => {
+      const pa = prefIndex(a);
+      const pb = prefIndex(b);
+      if (pa !== pb) return pa - pb;
+      return String(a).localeCompare(String(b), "de");
+    })
+    .slice(0, maxManufacturers);
 
   return (
     <div className={`flex items-center justify-between gap-2 ${className}`.trim()}>

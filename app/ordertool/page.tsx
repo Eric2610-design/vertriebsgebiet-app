@@ -27,7 +27,8 @@ type ApiStockItem = {
   avail_total: number;
   status: "SOFORT" | "ZUKUNFT";
   eta_month: string | null;
-  max_order_qty: number;
+    ek_base: number | null;
+max_order_qty: number;
   availability_plan: any;
 };
 
@@ -477,22 +478,43 @@ export default function OrdertoolPage() {
       if (l.item.motor === "BOSCH" && isFix) boschFix += l.q;
       if (l.item.motor === "PANASONIC" && isFix) panaFix += l.q;
 
-      // EK-Schätzung: VK / Faktor (wenn Regel vorhanden), sonst VK.
+      // EK: bevorzugt EK aus Fixpreistabelle; falls vorhanden, kann (bei Fixpreis) eine bessere Schwelle (VK/Faktor) greifen.
       const factor = (l.item.motor === "BOSCH" || l.item.motor === "PANASONIC")
         ? pickFactor(l.item.motor, isFix)
         : null;
-      const unit = factor && Number.isFinite(factor) && factor > 0 ? l.item.vk / factor : l.item.vk;
+
+      const baseEkRaw = Number((l.item as any).ek_base);
+      const baseEk = Number.isFinite(baseEkRaw) && baseEkRaw > 0 ? baseEkRaw : null;
+
+      const ekByFactor = (factor && Number.isFinite(factor) && factor > 0) ? (l.item.vk / factor) : null;
+      const ekByFactorOk = (ekByFactor && Number.isFinite(ekByFactor) && ekByFactor > 0) ? ekByFactor : null;
+
+      const unit = baseEk != null && ekByFactorOk != null ? Math.min(baseEk, ekByFactorOk) : (baseEk != null ? baseEk : (ekByFactorOk != null ? ekByFactorOk : l.item.vk));
       value += unit * l.q;
     }
     return { totalQty, boschFix, panaFix, value };
   }, [cartLines, stock?.thresholds?.rules, market]);
 
+  
+  const maxBySku = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const it of items) {
+      const v = Math.floor(Number((it as any).max_order_qty) || 0);
+      m.set(it.sku, Math.max(0, v));
+    }
+    return m;
+  }, [items]);
+
+
   const onQtyChange = (sku: string, qty: number) => {
     setCart((prev) => {
       const next = { ...prev };
-      const q = Math.max(0, Math.floor(Number(qty) || 0));
-      if (q <= 0) delete next[sku];
-      else next[sku] = q;
+      const raw = Math.floor(Number(qty) || 0);
+      const max = maxBySku.get(sku);
+      const q = Math.max(0, Number.isFinite(raw) ? raw : 0);
+      const clamped = max == null ? q : Math.min(q, max);
+      if (clamped <= 0) delete next[sku];
+      else next[sku] = clamped;
       return next;
     });
   };
@@ -600,6 +622,14 @@ export default function OrdertoolPage() {
                         <div className="text-xs font-semibold text-slate-900">
                           {Math.round(t.vk).toLocaleString("de-DE")} {t.currency}
                         </div>
+                        <div className="text-xs text-slate-600">
+                          EK: {(() => {
+                            const vals = t.rows.map((x) => Number((x as any).ek_base)).filter((n) => Number.isFinite(n) && n > 0) as number[];
+                            if (!vals.length) return "—";
+                            const v = Math.min(...vals);
+                            return Math.round(v).toLocaleString("de-DE") + " " + t.currency;
+                          })()}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -615,7 +645,7 @@ export default function OrdertoolPage() {
                       {t.rows.map((r) => {
                         const dot = normalizeHex("") || colorToHex(r.color ?? "");
                         const qty = cart[r.sku] ?? 0;
-                        const eta = r.status === "SOFORT" ? "sofort" : etaLabel(r.eta_month, market) ?? "(ohne Datum)";
+                        const eta = r.status === "ZUKUNFT" ? etaLabel(r.eta_month, market) : null;
                         return (
                           <div key={r.id} className="grid grid-cols-[34px_70px_1fr_110px] items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 px-2 py-2">
                             <div className="flex items-center justify-center">
@@ -630,7 +660,7 @@ export default function OrdertoolPage() {
                                 }
                               />
                               <span className="text-xs font-semibold text-slate-900">{bucketAvail(r.avail_total)}</span>
-                              <span className="text-xs text-slate-500">· {r.status === "SOFORT" ? "SOFORT" : `ZUKUNFT (${eta})`}</span>
+                              <span className="text-xs text-slate-500">{r.status === "ZUKUNFT" && eta ? `· ${eta}` : ""}</span>
                             </div>
                             <div className="flex justify-end">
                               <input
@@ -739,7 +769,7 @@ export default function OrdertoolPage() {
                 <Select value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
                   <option value="">Verfügbarkeit: alle</option>
                   {filterOptions.statuses.map((v) => (
-                    <option key={v} value={v}>{v}</option>
+                    <option key={v} value={v}>{v === "SOFORT" ? "Sofort" : v === "ZUKUNFT" ? "Zukünftig" : v}</option>
                   ))}
                 </Select>
               </div>
@@ -844,7 +874,12 @@ export default function OrdertoolPage() {
                             {l.sku}
                             {l.item.color ? ` · ${l.item.color}` : ""}
                             {l.item.frame_size ? ` · ${l.item.frame_size}` : ""}
-                            {l.item.status === "SOFORT" ? " · SOFORT" : ` · ZUKUNFT ${l.item.eta_month ? `(${l.item.eta_month})` : ""}`}
+                            {` · EK ${(() => {
+                              const v = Number((l.item as any).ek_base);
+                              if (Number.isFinite(v) && v > 0) return Math.round(v).toLocaleString("de-DE");
+                              return "—";
+                            })()} ${l.item.currency} · UVP ${Math.round(l.item.vk).toLocaleString("de-DE")} ${l.item.currency}`}
+                            {l.item.status === "ZUKUNFT" ? (etaLabel(l.item.eta_month, market) ? ` · ${etaLabel(l.item.eta_month, market)}` : "") : ""}
                           </div>
                         </div>
                         <div className="flex items-center gap-2">

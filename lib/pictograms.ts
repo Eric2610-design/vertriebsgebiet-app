@@ -5,6 +5,7 @@ export const MANUFACTURER_ICON_FALLBACK: Record<string, string> = {
   kalkhoff: "/brands/kalkhoff.jpeg",
   cube: "/brands/cube.png",
   scott: "/brands/scott.png",
+  bergamont: "/brands/bergamont.svg",
 };
 
 // Einkaufsverbände (nicht Hersteller)

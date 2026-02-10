@@ -526,6 +526,7 @@ export default function MapPage() {
           <div style="margin-top:6px;font-size:12px">${icons ? `<b>Marken:</b> ${icons}` : ""}</div>
           ${repNames ? `<div style="margin-top:4px;font-size:12px"><b>AD:</b> ${escapeHtml(repNames)}</div>` : ""}
           <div style="margin-top:8px"><a href="/dealer/${encodeURIComponent(d.id)}" style="color:#2563eb;text-decoration:underline">Details öffnen</a></div>
+          <div style="margin-top:6px"><a href="/ordertool?dealerId=${encodeURIComponent(d.id)}" style="color:#2563eb;text-decoration:underline">Bestellung starten</a></div>
         </div>
       `;
 
@@ -773,8 +774,7 @@ export default function MapPage() {
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2 text-sm">
-          <Badge tone="slate">Händler gesamt: {dealers.length}</Badge>
-          <Badge tone="slate">Nach Filter: {filteredDealers.length}</Badge>
+                    <Badge tone="slate">Nach Filter: {filteredDealers.length}</Badge>
           <Badge tone="slate">Im Ausschnitt: {visibleWithGeo.length}</Badge>
           {loading ? <Badge tone="amber">Lade…</Badge> : null}
         </div>
