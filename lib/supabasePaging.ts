@@ -8,7 +8,8 @@ export type SupabasePageResult<T> = { data: T[] | null; error: any };
  * With `.range(from, to)` you can safely page through.
  */
 export async function fetchAllPaged<T>(
-  fetchPage: (from: number, to: number) => Promise<SupabasePageResult<T>>,
+  // NOTE: supabase-js query builders are PromiseLike (thenables) but not full Promises.
+  fetchPage: (from: number, to: number) => PromiseLike<SupabasePageResult<T>>,
   opts?: { pageSize?: number; maxRows?: number }
 ): Promise<T[]> {
   const pageSize = Math.max(1, Math.floor(opts?.pageSize ?? 1000));
