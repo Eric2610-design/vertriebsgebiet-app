@@ -32,7 +32,13 @@ type FixpriceSettingValue = {
     rows?: number;
     unique_articles?: number;
   };
-  byArticleNo?: Record<string, { motor?: string; isFixprice?: boolean }>;
+  byArticleNo?: Record<string, { motor?: string; isFixprice?: boolean; ek?: number }>;
+};
+
+type MaxQtySettings = {
+  version: number;
+  defaultMax: number;
+  overrides: Record<string, number>;
 };
 
 type PricingAttributeAction = "FIXPREIS" | "SONDERPREIS" | "SCHWELLE";
