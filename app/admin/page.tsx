@@ -17,6 +17,7 @@ export default function AdminPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [manus, setManus] = useState<any[]>([]);
   const [groups, setGroups] = useState<any[]>([]);
+  const [dealerStats, setDealerStats] = useState<any | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -34,6 +35,15 @@ export default function AdminPage() {
         if (typeof v === "number") setMonths(String(v));
         else if (typeof v === "string") setMonths(v);
         else if (v?.value !== undefined) setMonths(String(v.value));
+
+        // Händler-Statistiken (gesamt / mit Geo / ohne Geo)
+        try {
+          const sRes = await fetch("/api/admin/dealers/stats", { cache: "no-store" });
+          const sJ = await sRes.json().catch(() => ({}));
+          if (alive) setDealerStats(sJ?.total !== undefined ? sJ : null);
+        } catch {
+          if (alive) setDealerStats(null);
+        }
 
         // Pictograms overview
         const [mRes, gRes] = await Promise.all([
@@ -128,6 +138,36 @@ export default function AdminPage() {
             <p className="text-slate-600 text-sm">Zentrale Verwaltung & Einstellungen.</p>
           </div>
         </div>
+
+        <Card className="mb-6">
+          <CardHeader className="flex items-center justify-between">
+            <div>
+              <div className="font-medium">Händlerbestand</div>
+              <div className="text-sm text-slate-600">Schneller Überblick (aktiv · nicht gemerged).</div>
+            </div>
+            <Badge>{dealerStats ? "bereit" : "—"}</Badge>
+          </CardHeader>
+          <CardContent>
+            {dealerStats ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <div className="text-xs text-slate-500">Gesamt</div>
+                  <div className="text-lg font-semibold">{dealerStats.total ?? "—"}</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <div className="text-xs text-slate-500">Mit Geodaten</div>
+                  <div className="text-lg font-semibold">{dealerStats.with_geo ?? "—"}</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <div className="text-xs text-slate-500">Ohne Geodaten</div>
+                  <div className="text-lg font-semibold">{dealerStats.without_geo ?? "—"}</div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-slate-600">Keine Statistik verfügbar (evtl. keine Admin-Rechte oder API-Fehler).</div>
+            )}
+          </CardContent>
+        </Card>
 
         <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-6">
           <Card>

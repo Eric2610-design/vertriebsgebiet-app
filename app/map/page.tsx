@@ -98,6 +98,10 @@ export default function MapPage() {
   const [bounds, setBounds] = useState<Bounds | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
 
+  // Marker-/Listen-Limits (Performance)
+  const MARKER_LIMIT = 2000;
+  const [listLimit, setListLimit] = useState(2000);
+
   // Geo-duplicate merging (quick access on the map page)
   const [geoDupGroups, setGeoDupGroups] = useState<any[]>([]);
   const [dupLoading, setDupLoading] = useState(false);
@@ -393,12 +397,20 @@ export default function MapPage() {
     });
   }, [dealers, q, selectedManu, selectedReps, selectedBuyingGroups, territoriesByRep]);
 
-  const visibleWithGeo = useMemo(() => {
-    return filteredDealers
-      .filter((d) => inBounds(d, bounds))
-      .filter((d) => d.lat != null && d.lng != null)
-      .slice(0, 2000);
+  // Alle sichtbaren Händler im Kartenausschnitt (mit Geodaten)
+  const visibleWithGeoAll = useMemo(() => {
+    return filteredDealers.filter((d) => inBounds(d, bounds)).filter((d) => d.lat != null && d.lng != null);
   }, [filteredDealers, bounds]);
+
+  // Marker sind aus Performance-Gründen hart begrenzt.
+  const visibleMarkers = useMemo(() => {
+    return visibleWithGeoAll.slice(0, MARKER_LIMIT);
+  }, [visibleWithGeoAll]);
+
+  // Liste darf größer werden (per Button), damit man auch über "F" hinaus kommt.
+  const visibleList = useMemo(() => {
+    return visibleWithGeoAll.slice(0, listLimit);
+  }, [visibleWithGeoAll, listLimit]);
 
   const initMap = () => {
     if (!leafletReady) return;
@@ -473,7 +485,7 @@ export default function MapPage() {
     const L = leafletRef.current as any;
     if (!L) return;
 
-    const desired = new Set(visibleWithGeo.map((d) => d.id));
+    const desired = new Set(visibleMarkers.map((d) => d.id));
 
     // remove stale
     for (const [id, marker] of markersRef.current.entries()) {
@@ -484,7 +496,7 @@ export default function MapPage() {
     }
 
     // add / update
-    for (const d of visibleWithGeo) {
+    for (const d of visibleMarkers) {
       if (d.lat == null || d.lng == null) continue;
       const keys = d.manufacturer_keys ?? [];
       const bgKey = (d as any).buying_group_key as string | undefined;
@@ -541,7 +553,7 @@ export default function MapPage() {
         markersRef.current.set(d.id, m);
       }
     }
-  }, [leafletReady, visibleWithGeo, labelByKey, dealerRepNames, flyerIconByBg, buyingGroupMarkerIcon, defaultIcon, buyingGroupIconByKey]);
+  }, [leafletReady, visibleMarkers, labelByKey, dealerRepNames, flyerIconByBg, buyingGroupMarkerIcon, defaultIcon, buyingGroupIconByKey]);
 
   const runGeocode = async () => {
     try {
@@ -774,8 +786,9 @@ export default function MapPage() {
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2 text-sm">
-                    <Badge tone="slate">Nach Filter: {filteredDealers.length}</Badge>
-          <Badge tone="slate">Im Ausschnitt: {visibleWithGeo.length}</Badge>
+          <Badge tone="slate">Nach Filter: {filteredDealers.length}</Badge>
+          <Badge tone="slate">Im Ausschnitt (mit Geo): {visibleWithGeoAll.length}</Badge>
+          {visibleWithGeoAll.length > MARKER_LIMIT ? <Badge tone="amber">Marker-Limit: {MARKER_LIMIT}</Badge> : null}
           {loading ? <Badge tone="amber">Lade…</Badge> : null}
         </div>
       </div>
@@ -787,11 +800,11 @@ export default function MapPage() {
             <Button
               variant="secondary"
               className="h-8 px-3"
-              disabled={exportBusy || visibleWithGeo.length === 0}
+              disabled={exportBusy || visibleMarkers.length === 0}
               onClick={async () => {
                 try {
                   setExportBusy(true);
-                  const ids = visibleWithGeo.slice(0, 2000).map((d) => d.id);
+                  const ids = visibleMarkers.map((d) => d.id);
                   const res = await fetch("/api/dealers/export", {
                     method: "POST",
                     headers: { "content-type": "application/json" },
@@ -823,11 +836,11 @@ export default function MapPage() {
           <CardContent className="max-h-[72vh] overflow-auto">
             {mapError ? (
               <div className="text-sm text-rose-700">{mapError}</div>
-            ) : visibleWithGeo.length === 0 ? (
+            ) : visibleWithGeoAll.length === 0 ? (
               <div className="text-sm text-slate-600">Keine Händler im aktuellen Kartenausschnitt (oder noch ohne Geodaten).</div>
             ) : (
               <ul className="space-y-2">
-                {visibleWithGeo.map((d) => {
+                {visibleList.map((d) => {
                   const keys2 = d.manufacturer_keys ?? [];
                   const repNames = dealerRepNames.get(d.id) ?? "";
                   const buyingGroupKey = (d as any).buying_group_key as string | null | undefined;
@@ -854,7 +867,19 @@ export default function MapPage() {
                 })}
               </ul>
             )}
-            {visibleWithGeo.length >= 2000 ? <div className="mt-2 text-xs text-slate-500">Liste gekürzt auf 2000.</div> : null}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {listLimit < visibleWithGeoAll.length ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => setListLimit((n) => Math.min(n + 2000, Math.max(2000, visibleWithGeoAll.length)))}
+                >
+                  Mehr anzeigen
+                </Button>
+              ) : null}
+              <div className="text-xs text-slate-500">
+                Liste: {Math.min(listLimit, visibleWithGeoAll.length)} / {visibleWithGeoAll.length} · Marker: {Math.min(MARKER_LIMIT, visibleWithGeoAll.length)}
+              </div>
+            </div>
           </CardContent>
         </Card>
 
