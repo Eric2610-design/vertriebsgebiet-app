@@ -87,6 +87,10 @@ export default function RepClient({ email }: { email: string }) {
   const [bgFilter, setBgFilter] = useState("");
   const [sortBy, setSortBy] = useState<"name" | "buying_group" | "zip">("name");
 
+  // Large territories can contain many dealers. We keep the UI snappy by rendering in chunks.
+  const DEALERS_STEP = 800;
+  const [visibleDealers, setVisibleDealers] = useState<number>(DEALERS_STEP);
+
   // placeholders
   const [lookbackDays, setLookbackDays] = useState<number>(90);
 
@@ -131,6 +135,11 @@ export default function RepClient({ email }: { email: string }) {
       cancelled = true;
     };
   }, [email]);
+
+  // Reset list window when filters/sort change (prevents confusion when you scroll).
+  useEffect(() => {
+    setVisibleDealers(DEALERS_STEP);
+  }, [q, bgFilter, sortBy]);
 
   async function loadBikes() {
     setBikesLoading(true);
@@ -357,12 +366,15 @@ export default function RepClient({ email }: { email: string }) {
               </Select>
             </div>
             <div className="mt-2 text-xs text-slate-500">Treffer: {dealersFiltered.length} / {(data?.dealers ?? []).length}</div>
+            <div className="mt-1 text-xs text-slate-500">
+              Angezeigt: {Math.min(visibleDealers, dealersFiltered.length)} / {dealersFiltered.length}
+            </div>
             <div className="mt-2 max-h-[55vh] overflow-auto rounded-xl border border-slate-200 bg-white">
               {dealersFiltered.length === 0 ? (
                 <div className="p-3 text-sm text-slate-500">Keine Händler.</div>
               ) : (
                 <ul className="divide-y divide-slate-100">
-                  {dealersFiltered.slice(0, 800).map((d) => (
+                  {dealersFiltered.slice(0, visibleDealers).map((d) => (
                     <li key={d.id} className="p-3">
                       <div className="flex items-start justify-between gap-2">
                         <div>
@@ -392,7 +404,22 @@ export default function RepClient({ email }: { email: string }) {
                 </ul>
               )}
             </div>
-            {dealersFiltered.length > 800 ? <div className="mt-2 text-xs text-slate-500">Liste gekürzt auf 800.</div> : null}
+            {dealersFiltered.length > visibleDealers ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() => setVisibleDealers((v) => Math.min(v + DEALERS_STEP, dealersFiltered.length))}
+                >
+                  Mehr anzeigen (+{DEALERS_STEP})
+                </Button>
+                <Button variant="secondary" onClick={() => setVisibleDealers(dealersFiltered.length)}>
+                  Alle anzeigen
+                </Button>
+                <div className="text-xs text-slate-500">
+                  Hinweis: Es werden aus Performancegründen nur {visibleDealers} gerendert.
+                </div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 

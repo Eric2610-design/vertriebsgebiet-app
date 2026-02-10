@@ -1,5 +1,6 @@
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
+import { fetchAllPaged } from "@/lib/supabasePaging";
 
 function plz2(zip?: string | null): number | null {
   if (!zip) return null;
@@ -28,15 +29,38 @@ export async function GET(_: Request, ctx: { params: Promise<{ email: string }> 
     .eq("profile_email", email);
   if (terr) return bad(terr.message, 500);
 
-  // Load dealers (cap) and filter in code by territory ranges.
-  const { data: dealers, error: derr } = await supabase
-    .from("dealers")
-    .select("id,name,street,zip,city,country")
-    .order("name", { ascending: true })
-    .limit(10000);
-  if (derr) return bad(derr.message, 500);
-
+  // Load dealers (paged) and filter in code by territory ranges.
+  // Important: PostgREST often caps responses at ~1000 rows even if `.limit()` is higher.
   const ranges = territories ?? [];
+  const countries = Array.from(
+    new Set(
+      ranges
+        .map((r: any) => String(r.country ?? "DE").toUpperCase())
+        .filter((c: string) => !!c)
+    )
+  );
+
+  let dealers: any[] = [];
+  try {
+    const orCountry = countries.length
+      ? `country.is.null,country.in.(${countries.join(",")})`
+      : "country.is.null";
+
+    dealers = await fetchAllPaged<any>(
+      (from, to) =>
+        supabase
+          .from("dealers")
+          .select("id,name,zip,city,country,buying_group_key")
+          .or(orCountry)
+          .order("name", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to),
+      { pageSize: 1000, maxRows: 50000 }
+    );
+  } catch (e: any) {
+    return bad(e?.message ?? "Failed to load dealers", 500);
+  }
+
   const dealerItems = (dealers ?? []).filter((d: any) => {
     const p = plz2(d.zip);
     if (p == null) return false;
@@ -44,7 +68,27 @@ export async function GET(_: Request, ctx: { params: Promise<{ email: string }> 
     return ranges.some((r: any) => String(r.country ?? "DE").toUpperCase() === c && p >= r.plz2_from && p <= r.plz2_to);
   });
 
+  // manufacturer pictograms
+  const manuByDealer = new Map<string, string[]>();
   const dealerIds = dealerItems.map((d: any) => d.id);
+  if (dealerIds.length) {
+    const chunkSize = 600;
+    for (let i = 0; i < dealerIds.length; i += chunkSize) {
+      const chunk = dealerIds.slice(i, i + chunkSize);
+      const { data: dm, error: dmErr } = await supabase
+        .from("dealer_manufacturers")
+        .select("dealer_id,manufacturer_key")
+        .in("dealer_id", chunk);
+      if (dmErr) return bad(dmErr.message, 500);
+      for (const row of dm ?? []) {
+        const did = String((row as any).dealer_id);
+        const mk = String((row as any).manufacturer_key);
+        if (!manuByDealer.has(did)) manuByDealer.set(did, []);
+        manuByDealer.get(did)!.push(mk);
+      }
+    }
+  }
+
   let visits: any[] = [];
   if (dealerIds.length) {
     const { data: v, error: verr } = await supabase
@@ -77,6 +121,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ email: string }> 
   }
   const dealersWithLast = dealerItems.map((d: any) => ({
     ...d,
+    manufacturer_keys: manuByDealer.get(d.id) ?? [],
     last_visit_at: lastVisitByDealer.get(d.id) ?? null,
   }));
 

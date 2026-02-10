@@ -2,10 +2,7 @@
 
 **Datum:** 2026-02-10 (Europe/Berlin)
 
-Dieses ZIP enthält **immer die zwei neuesten Versionen**:
-
-1. **Aktuell (root):** Der aktuelle Projektstand (diese Version).
-2. **Vorherige Version:** `./_previous_version/vertriebsgebiet-app-main_prev/`
+Dieses ZIP enthält **nur die aktuellste Version** (kein "previous"-Ordner).
 
 ## Änderungen in dieser Version
 
@@ -18,11 +15,16 @@ Diese Version stellt alle betroffenen Endpunkte auf **Paging via `.range(from,to
 
 **Gefixt:**
 - `app/api/reps/list/route.ts` – AD/Profiles + Territories laden jetzt vollständig (Paging)
+- `app/api/reps/[email]/summary/route.ts` – Händler im AD-Gebiet werden jetzt **paged** geladen (nicht mehr nur die ersten ~1000) + `manufacturer_keys` für Piktogramme
 - `app/api/backorders/route.ts` – Backorders laden jetzt bis `limit` (default 5000, max 10000) via Paging
 - `app/api/ordertool/bootstrap/route.ts` – Stock-Items für Ordertool via Paging (verhindert abgeschnittene Treffer)
 - `app/api/ordertool/data/route.ts` – Attribute/Filter-Daten via Paging (nicht nur erste ~1000)
 - `app/api/admin/dealers/no-geo/route.ts` – Admin-Geodaten-Übersicht (Händler ohne Geodaten) via Paging
 - `app/api/admin/dealers/no-geo/export/route.ts` – Export ebenfalls via Paging
+
+### AD-Ansicht: Liste nicht mehr „nur bis F“
+Auf der Detailseite eines Außendienstlers wurde die Händlerliste bisher auf 800 Einträge gekürzt.
+Jetzt gibt es "Mehr anzeigen" / "Alle anzeigen" – so kannst du alle Händler durchscrollen.
 
 ## Start / Setup (Kurz)
 
