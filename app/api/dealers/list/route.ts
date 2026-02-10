@@ -53,19 +53,24 @@ export async function GET() {
     }
 
     
-// Load manufacturers for these dealers in one query (views cannot embed relationships).
+// Load manufacturers for these dealers.
+// NOTE: PostgREST can return "Bad Request" when `.in()` contains too many IDs.
+// Therefore we fetch manufacturers in chunks.
 const ids = all.map((d: any) => d.id).filter(Boolean);
 const manuByDealer = new Map<string, string[]>();
-if (ids.length) {
+const CHUNK = 500;
+for (let i = 0; i < ids.length; i += CHUNK) {
+  const chunk = ids.slice(i, i + CHUNK);
   const { data: manuRows, error: mErr } = await supabase
     .from("dealer_manufacturers")
     .select("dealer_id,manufacturer_key")
-    .in("dealer_id", ids);
+    .in("dealer_id", chunk);
   if (mErr) return bad(mErr.message, 500);
   for (const r of manuRows ?? []) {
-    const arr = manuByDealer.get((r as any).dealer_id) ?? [];
-    arr.push((r as any).manufacturer_key);
-    manuByDealer.set((r as any).dealer_id, arr);
+    const dealerId = String((r as any).dealer_id);
+    const arr = manuByDealer.get(dealerId) ?? [];
+    arr.push(String((r as any).manufacturer_key));
+    manuByDealer.set(dealerId, arr);
   }
 }
 
