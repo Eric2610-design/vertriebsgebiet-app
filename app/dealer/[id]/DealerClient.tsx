@@ -78,6 +78,13 @@ export default function DealerClient({ id }: { id: string }) {
   async function loadDealer() {
     const res = await fetch(`/api/dealers/${id}`, { cache: "no-store" });
     const js = await res.json();
+
+    // If this dealer was merged into another master record, redirect automatically.
+    if (js?.redirect_to && String(js.redirect_to) && String(js.redirect_to) !== String(id)) {
+      window.location.href = `/dealer/${encodeURIComponent(String(js.redirect_to))}`;
+      return;
+    }
+
     setDealer(js);
     setContacts(js?.contacts ?? []);
 

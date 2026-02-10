@@ -32,7 +32,30 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
     .eq("id", params.id)
     .maybeSingle();
   if (error) return bad(error.message, 500);
-  if (!dealer) return ok({ dealer: null });
+
+  // Falls der Händler nicht in der Master-View ist (z.B. gemerged/ausgeschlossen),
+  // geben wir einen Hinweis zurück, damit die UI ggf. zum Master umleiten kann.
+  if (!dealer) {
+    try {
+      const { data: raw, error: rErr } = await supabase
+        .from("dealers")
+        .select("id,name,status,merged_into,parent_dealer_id,branch_label")
+        .eq("id", params.id)
+        .maybeSingle();
+      if (rErr) return ok({ dealer: null });
+      if (!raw) return ok({ dealer: null });
+
+      const mergedInto = (raw as any)?.merged_into ? String((raw as any).merged_into) : null;
+      if (mergedInto) {
+        return ok({ dealer: null, redirect_to: mergedInto, reason: "merged" });
+      }
+
+      // Exists, but not visible in master view
+      return ok({ dealer: null, reason: "filtered" });
+    } catch {
+      return ok({ dealer: null });
+    }
+  }
 
   let buying_group: any = null;
   if ((dealer as any).buying_group_key) {

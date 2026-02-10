@@ -26,6 +26,17 @@ Diese Version stellt alle betroffenen Endpunkte auf **Paging via `.range(from,to
 Auf der Detailseite eines Außendienstlers wurde die Händlerliste bisher auf 800 Einträge gekürzt.
 Jetzt gibt es "Mehr anzeigen" / "Alle anzeigen" – so kannst du alle Händler durchscrollen.
 
+### Händlerdetail: "Nicht gefunden" bei gemergten Datensätzen
+Manche Händler tauchten in der AD-Liste auf, ließen sich aber nicht öffnen, weil die Detailansicht aus der
+Master-View lädt (die gemergte/ausgeschlossene Datensätze filtert).
+
+**Neu:**
+- `app/api/dealers/[id]/route.ts` – wenn ein Händler nicht in der Master-View ist, wird geprüft, ob er `merged_into` ist.
+  Dann liefert die API `redirect_to` zurück.
+- `app/dealer/[id]/DealerClient.tsx` – erkennt `redirect_to` und leitet automatisch auf den Master-Händler um.
+- `app/api/reps/[email]/summary/route.ts` – filtert gemergte/ausgeschlossene Händler (wenn Spalten vorhanden),
+  damit in der AD-Liste weniger "tote" Links auftauchen.
+
 ## Start / Setup (Kurz)
 
 - `.env` aus `.env.example` ableiten

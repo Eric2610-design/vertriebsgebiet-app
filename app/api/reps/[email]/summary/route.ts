@@ -46,22 +46,46 @@ export async function GET(_: Request, ctx: { params: Promise<{ email: string }> 
       ? `country.is.null,country.in.(${countries.join(",")})`
       : "country.is.null";
 
-    dealers = await fetchAllPaged<any>(
-      (from, to) =>
-        supabase
-          .from("dealers")
-          .select("id,name,zip,city,country,buying_group_key")
-          .or(orCountry)
-          .order("name", { ascending: true })
-          .order("id", { ascending: true })
-          .range(from, to),
-      { pageSize: 1000, maxRows: 50000 }
-    );
+    // Some schemas may not have status/merged_into. We try the richer select first and fall back.
+    const variants = [
+      "id,name,zip,city,country,buying_group_key,status,merged_into",
+      "id,name,zip,city,country,buying_group_key",
+    ];
+
+    let lastErr: any = null;
+    for (const sel of variants) {
+      try {
+        dealers = await fetchAllPaged<any>(
+          (from, to) =>
+            supabase
+              .from("dealers")
+              .select(sel)
+              .or(orCountry)
+              .order("name", { ascending: true })
+              .order("id", { ascending: true })
+              .range(from, to),
+          { pageSize: 1000, maxRows: 50000 }
+        );
+        lastErr = null;
+        break;
+      } catch (e: any) {
+        lastErr = e;
+        continue;
+      }
+    }
+
+    if (lastErr) throw lastErr;
   } catch (e: any) {
     return bad(e?.message ?? "Failed to load dealers", 500);
   }
 
   const dealerItems = (dealers ?? []).filter((d: any) => {
+    // Keep list consistent with dealer detail view (master view filters merged/excluded).
+    const mergedInto = (d as any)?.merged_into ? String((d as any).merged_into) : null;
+    if (mergedInto) return false;
+    const st = ((d as any)?.status ?? "").toString().toLowerCase();
+    if (st && ["merged", "merged_force", "excluded"].includes(st)) return false;
+
     const p = plz2(d.zip);
     if (p == null) return false;
     const c = String(d.country ?? "DE").toUpperCase();
