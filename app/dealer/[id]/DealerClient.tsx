@@ -34,6 +34,11 @@ export default function DealerClient({ id }: { id: string }) {
   const [saving, setSaving] = useState(false);
 
   const [isAdmin, setIsAdmin] = useState(false);
+  const [canEditGeo, setCanEditGeo] = useState(false);
+
+  const [geoLat, setGeoLat] = useState<string>("");
+  const [geoLng, setGeoLng] = useState<string>("");
+  const [geoSaving, setGeoSaving] = useState(false);
 
   // Mini map (Leaflet)
   const miniMapRef = useRef<HTMLDivElement | null>(null);
@@ -87,6 +92,8 @@ export default function DealerClient({ id }: { id: string }) {
 
     setDealer(js);
     setContacts(js?.contacts ?? []);
+    setGeoLat(js?.dealer?.lat != null ? String(js.dealer.lat) : "");
+    setGeoLng(js?.dealer?.lng != null ? String(js.dealer.lng) : "");
 
 
     // other dealers in the same PLZ (only show when there is actually more than one)
@@ -159,15 +166,43 @@ export default function DealerClient({ id }: { id: string }) {
     }
   }
 
+  async function saveGeo() {
+    const lat = Number(String(geoLat).replace(",", "."));
+    const lng = Number(String(geoLng).replace(",", "."));
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      alert("Bitte gültige Lat/Lng eingeben.");
+      return;
+    }
+    setGeoSaving(true);
+    try {
+      const res = await fetch(`/api/dealers/${encodeURIComponent(id)}/set-coords`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ lat, lng }),
+      });
+      const js = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(js?.error || "Speichern fehlgeschlagen");
+      await loadAll();
+      alert("Koordinaten gespeichert.");
+    } catch (e: any) {
+      alert(e?.message || "Speichern fehlgeschlagen");
+    } finally {
+      setGeoSaving(false);
+    }
+  }
+
   useEffect(() => {
     (async () => {
       try {
         const r = await fetch("/api/auth/me", { cache: "no-store" });
         const j = await r.json();
         const role = String(j?.role || "").toLowerCase();
-        setIsAdmin(role === "admin" || role === "superadmin" || !!j?.is_admin);
+        const adminish = role === "admin" || role === "superadmin" || !!j?.is_admin;
+        setIsAdmin(adminish);
+        setCanEditGeo(adminish || role === "aussendienst");
       } catch {
         setIsAdmin(false);
+        setCanEditGeo(false);
       }
     })();
     loadAll();
@@ -649,7 +684,22 @@ Hinweis: ${sameZipForce ? "FORCE aktiv (ignoriert Adresse/Land/PLZ-Checks)." : "
           <CardHeader className="text-sm font-semibold">Karte (Ausschnitt)</CardHeader>
           <CardContent>
             {d.lat == null || d.lng == null ? (
-              <div className="text-sm text-slate-600">Keine Koordinaten vorhanden.</div>
+              <div className="space-y-2">
+                <div className="text-sm text-slate-600">Keine Koordinaten vorhanden.</div>
+                {canEditGeo ? (
+                  <div className="rounded-xl border bg-slate-50 p-3">
+                    <div className="text-xs text-slate-600">Koordinaten manuell setzen</div>
+                    <div className="flex gap-2 mt-2 flex-wrap">
+                      <Input value={geoLat} onChange={(e) => setGeoLat(e.target.value)} placeholder="Lat (z.B. 50.1109)" />
+                      <Input value={geoLng} onChange={(e) => setGeoLng(e.target.value)} placeholder="Lng (z.B. 8.6821)" />
+                      <Button variant="secondary" onClick={saveGeo} disabled={geoSaving}>
+                        {geoSaving ? "Speichert…" : "Speichern"}
+                      </Button>
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">Damit wird der Händler sofort auf der Karte sichtbar.</div>
+                  </div>
+                ) : null}
+              </div>
             ) : (
               <div className="h-[220px] w-full overflow-hidden rounded-xl border border-slate-200">
                 <div className="relative h-full w-full">

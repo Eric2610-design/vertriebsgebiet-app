@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { supabaseService } from "@/lib/supabase";
 import { ok, bad } from "@/app/api/_util";
-import { normText } from "@/lib/normalize";
+import { cleanDealerName, normText } from "@/lib/normalize";
 
 const DealerUpdateSchema = z.object({
   dealer: z.object({
@@ -111,7 +111,7 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
 
     const dealerId = params.id;
 
-    const name = body.dealer.name.trim();
+    const name = cleanDealerName(body.dealer.name);
     const street = body.dealer.street?.trim() ?? null;
     const city = body.dealer.city?.trim() ?? null;
     const zip = body.dealer.zip?.trim() ?? null;
@@ -163,8 +163,20 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
       if (oErr) return bad(oErr.message, 500);
     }
 
-    // Struktur-Felder bleiben direkt auf dealers (Filialen/Parent-Beziehung)
+    // Struktur-Felder + sichtbare Basisfelder direkt auf dealers,
+    // damit Änderungen SOFORT überall erscheinen (Karte, Listen, Views).
     const structural: any = {
+      name,
+      street,
+      zip,
+      city,
+      country: body.dealer.country?.trim() ?? null,
+      phone: body.dealer.phone?.trim() ?? null,
+      email: body.dealer.email?.trim() ?? null,
+      website: body.dealer.website?.trim() ?? null,
+      opening_hours: body.dealer.opening_hours?.trim() ?? null,
+      notes: body.dealer.notes?.trim() ?? null,
+
       parent_dealer_id: body.dealer.parent_dealer_id ?? null,
       branch_label: body.dealer.branch_label?.trim() ?? null,
       // Optional: norm_* weiterhin pflegen (hilft Matching/Debug)
@@ -174,6 +186,14 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
       zipcode_int: zip ? parseInt(zip.replace(/\D/g, "").padStart(5, "0"), 10) || null : null,
       country_iso: body.dealer.country?.trim() ?? null,
     };
+
+    // Manuelle Geo-Eingabe via Dealer-Form: direkt auf dealers schreiben.
+    if (typeof body.dealer.lat === "number" && typeof body.dealer.lng === "number") {
+      structural.lat = body.dealer.lat;
+      structural.lng = body.dealer.lng;
+      structural.geocode_status = "manual";
+      structural.last_geocoded_at = new Date().toISOString();
+    }
 
     const { error } = await supabase.from("dealers").update(structural).eq("id", dealerId);
     if (error) return bad(error.message, 500);

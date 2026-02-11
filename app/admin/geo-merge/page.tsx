@@ -37,6 +37,11 @@ export default function GeoMergePage() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [sLoading, setSLoading] = useState(false);
 
+  // Manual geo set for the active dealer (admin)
+  const [manualLat, setManualLat] = useState<string>("");
+  const [manualLng, setManualLng] = useState<string>("");
+  const [manualSaving, setManualSaving] = useState(false);
+
   // Force merge should be ON by default (same as buying-group merge)
   const [forceMerge, setForceMerge] = useState(true);
 
@@ -82,8 +87,43 @@ export default function GeoMergePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
+  useEffect(() => {
+    setManualLat(active?.lat != null ? String(active.lat) : "");
+    setManualLng(active?.lng != null ? String(active.lng) : "");
+  }, [active?.id]);
+
+  async function saveManualGeo() {
+    if (!active) return;
+    const lat = Number(String(manualLat).replace(",", "."));
+    const lng = Number(String(manualLng).replace(",", "."));
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      alert("Bitte gültige Lat/Lng eingeben.");
+      return;
+    }
+    if (!confirm(`Koordinaten für "${active.name}" speichern?\n\nLat: ${lat}\nLng: ${lng}`)) return;
+    setManualSaving(true);
+    try {
+      const res = await fetch("/api/admin/dealers/set-coords", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dealer_id: active.id, lat, lng }),
+      });
+      const js = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(js?.error || "Speichern fehlgeschlagen");
+      await load();
+      setActive(null);
+      alert("Gespeichert.");
+    } catch (e: any) {
+      alert(e?.message || "Speichern fehlgeschlagen");
+    } finally {
+      setManualSaving(false);
+    }
+  }
+
   async function loadSuggestions(dealer: DealerRow) {
     setActive(dealer);
+    setManualLat("");
+    setManualLng("");
     setSuggestions([]);
     setMasterItems([]);
     setSLoading(true);
@@ -281,6 +321,18 @@ export default function GeoMergePage() {
                 <div className="font-medium text-sm">{active.name}</div>
                 <div className="text-xs text-slate-600">{fmtAddr(active)}</div>
                 <div className="text-xs text-slate-500 mt-1">ID: {active.id}</div>
+
+                <div className="mt-3 rounded-xl border bg-slate-50 p-3">
+                  <div className="text-xs text-slate-600">Koordinaten manuell setzen (falls der Händler wichtig ist, aber kein Match existiert)</div>
+                  <div className="flex gap-2 mt-2 flex-wrap">
+                    <Input value={manualLat} onChange={(e) => setManualLat(e.target.value)} placeholder="Lat (z.B. 50.1109)" />
+                    <Input value={manualLng} onChange={(e) => setManualLng(e.target.value)} placeholder="Lng (z.B. 8.6821)" />
+                    <Button variant="secondary" onClick={saveManualGeo} disabled={manualSaving}>
+                      {manualSaving ? "Speichert…" : "Speichern"}
+                    </Button>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">Nach dem Speichern verschwindet der Händler aus „Ohne Geodaten“ und ist auf der Karte sichtbar.</div>
+                </div>
 
                 <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
                   <label className="text-xs text-slate-600 flex items-center gap-2">

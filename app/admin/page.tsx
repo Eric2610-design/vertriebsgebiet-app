@@ -169,7 +169,7 @@ export default function AdminPage() {
           </CardContent>
         </Card>
 
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-6">
           <Card>
             <CardContent className="p-4">
               <div className="text-sm font-semibold">Import</div>
@@ -205,6 +205,14 @@ export default function AdminPage() {
               <div className="text-sm font-semibold">Geo-Merge Übersicht</div>
               <div className="text-xs text-slate-600 mt-1">Wie viele Merges · normal vs. force · Liste.</div>
               <Link href="/admin/geo-merge/overview"><Button className="mt-3" variant="secondary">Öffnen</Button></Link>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-sm font-semibold">PLZ-Dubletten (Excel)</div>
+              <div className="text-xs text-slate-600 mt-1">Nur Land · nur Master · inkl. Name-Normalisierung.</div>
+              <Link href="/admin/zip-duplicates"><Button className="mt-3" variant="secondary">Öffnen</Button></Link>
             </CardContent>
           </Card>
         </div>

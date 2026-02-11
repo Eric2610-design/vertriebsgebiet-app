@@ -8,6 +8,17 @@ export function normText(v: unknown): string {
     .trim();
 }
 
+/**
+ * Cleans a dealer name for display/export.
+ * Handles common import artifacts (e.g. trailing "      Z").
+ */
+export function cleanDealerName(raw: unknown): string {
+  return String(raw ?? "")
+    .replace(/\s{2,}z\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function splitFlyerCustomer(raw: string): { externalId?: string; name: string } {
   const m = String(raw ?? "").match(/^\s*(\d+)\s*-\s*(.+)$/);
   if (m) return { externalId: m[1], name: m[2].trim() };
