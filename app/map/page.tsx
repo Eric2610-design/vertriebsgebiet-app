@@ -43,10 +43,18 @@ function plz2(zip?: string | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function toCoord(v: any): number | null {
+  if (v === undefined || v === null) return null;
+  const n = Number(String(v).replace(',', '.').trim());
+  return Number.isFinite(n) ? n : null;
+}
+
 function inBounds(d: DealerListItem, b: Bounds | null) {
   if (!b) return true;
-  if (d.lat == null || d.lng == null) return false;
-  return d.lat >= b.south && d.lat <= b.north && d.lng >= b.west && d.lng <= b.east;
+  const lat = toCoord((d as any).lat);
+  const lng = toCoord((d as any).lng);
+  if (lat == null || lng == null) return false;
+  return lat >= b.south && lat <= b.north && lng >= b.west && lng <= b.east;
 }
 
 export default function MapPage() {
@@ -399,7 +407,7 @@ export default function MapPage() {
 
   // Alle sichtbaren Händler im Kartenausschnitt (mit Geodaten)
   const visibleWithGeoAll = useMemo(() => {
-    return filteredDealers.filter((d) => inBounds(d, bounds)).filter((d) => d.lat != null && d.lng != null);
+    return filteredDealers.filter((d) => inBounds(d, bounds));
   }, [filteredDealers, bounds]);
 
   // Marker sind aus Performance-Gründen hart begrenzt.
@@ -497,7 +505,9 @@ export default function MapPage() {
 
     // add / update
     for (const d of visibleMarkers) {
-      if (d.lat == null || d.lng == null) continue;
+      const lat = toCoord((d as any).lat);
+      const lng = toCoord((d as any).lng);
+      if (lat == null || lng == null) continue;
       const keys = d.manufacturer_keys ?? [];
       const bgKey = (d as any).buying_group_key as string | undefined;
       const bgIcon = bgKey ? (buyingGroupIconByKey.get(bgKey) || null) : null;
@@ -544,11 +554,11 @@ export default function MapPage() {
 
       const existing = markersRef.current.get(d.id);
       if (existing) {
-        existing.setLatLng([d.lat, d.lng]);
+        existing.setLatLng([lat, lng]);
         existing.setIcon(icon);
         existing.bindPopup(popup);
       } else {
-        const m = L.marker([d.lat, d.lng], { icon }).addTo(map);
+        const m = L.marker([lat, lng], { icon }).addTo(map);
         m.bindPopup(popup);
         markersRef.current.set(d.id, m);
       }

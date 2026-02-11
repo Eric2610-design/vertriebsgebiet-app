@@ -118,12 +118,18 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
 
     // AD-/User-Eingaben sollen immer Vorrang haben:
     // Wir schreiben sie als Overrides (nicht direkt in dealers), damit künftige Uploads sie nicht überschreiben.
-    const overrides: { dealer_id: string; field_name: string; field_value: string }[] = [];
+    // Hinweis: Table hat sowohl field_value (text) als auch value_json (jsonb) – für Lat/Lng nutzen wir value_json.
+    const overrides: { dealer_id: string; field_name: string; field_value: string; value_json?: any | null }[] = [];
     const pushOv = (field_name: string, value: any) => {
       if (value === undefined || value === null) return;
+      if (typeof value === "number") {
+        if (!Number.isFinite(value)) return;
+        overrides.push({ dealer_id: dealerId, field_name, field_value: String(value), value_json: value });
+        return;
+      }
       const v = String(value).trim();
       if (!v) return;
-      overrides.push({ dealer_id: dealerId, field_name, field_value: v });
+      overrides.push({ dealer_id: dealerId, field_name, field_value: v, value_json: null });
     };
 
     pushOv("name", name);

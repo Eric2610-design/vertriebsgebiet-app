@@ -53,3 +53,23 @@ Wenn erneut ein Listen-Endpunkt bei ~1000 Einträgen "abgeschnitten" wirkt, imme
 ## Hotfix (2026-02-11)
 - Fix: Build-Fehler in `app/admin/zip-duplicates/page.tsx` behoben (UI-Select nutzt nun korrekt `onChange` + `<option>` statt `onValueChange/options`).
 
+
+## Hotfix (2026-02-11) – Option A (Leaflet Tile-Crash) + Override-View
+
+### Fix: „Attempted to load an infinite number of tiles“
+Beim Editieren von Händlern konnten `lat/lng` temporär als String/leer/komma-getrennt vorliegen.
+Leaflet bekommt dann ungültige Koordinaten (NaN) und bricht mit dem Tile-Fehler ab.
+
+**Gefixt:**
+- `app/dealer/[id]/DealerClient.tsx` – Mini-Map nutzt jetzt eine robuste `parseCoord()`-Logik (Komma → Punkt, Finite-Check).
+- `app/map/page.tsx` – zentrale `toCoord()`-Helper + Marker/Bounds nur mit validen Koordinaten.
+
+### Option A: Master-View respektiert Overrides (DB-Migration)
+Damit Änderungen (Name/Adresse/Geo etc.) nach Reload sichtbar bleiben, werden Overrides über die View gezogen.
+
+**Neu:** `supabase/migrations/006_v_dealers_master_overrides.sql`
+- stellt `dealer_field_overrides` + Spalten sicher
+- ergänzt fehlende Dealer-Spalten (für Neu-Setup)
+- `create or replace view public.v_dealers_master` mit `coalesce(overrides, dealers)` + Quellen-Aggregation
+
+> Wichtig: Migration einmal in Supabase ausführen (SQL Editor) oder per `supabase db push`.

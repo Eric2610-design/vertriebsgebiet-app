@@ -269,8 +269,14 @@ export default function DealerClient({ id }: { id: string }) {
     const d = dealer?.dealer;
     const el = miniMapRef.current;
     if (!el) return;
-    const lat = d?.lat;
-    const lng = d?.lng;
+    const parseCoord = (v: any): number | null => {
+      if (v === undefined || v === null) return null;
+      const n = Number(String(v).replace(',', '.').trim());
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const lat = parseCoord(d?.lat);
+    const lng = parseCoord(d?.lng);
     if (lat == null || lng == null) return;
 
     setMiniMapError("");
