@@ -50,3 +50,6 @@ Wenn erneut ein Listen-Endpunkt bei ~1000 Einträgen "abgeschnitten" wirkt, imme
 - wird `.range()` verwendet?
 - ist eine stabile `.order()` gesetzt (für Paging)?
 
+## Hotfix (2026-02-11)
+- Fix: Build-Fehler in `app/admin/zip-duplicates/page.tsx` behoben (UI-Select nutzt nun korrekt `onChange` + `<option>` statt `onValueChange/options`).
+

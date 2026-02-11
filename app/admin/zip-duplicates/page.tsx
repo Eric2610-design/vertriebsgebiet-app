@@ -69,15 +69,11 @@ export default function ZipDuplicatesPage() {
             <Badge>{country}</Badge>
           </CardHeader>
           <CardContent>
-            <Select
-              value={country}
-              onValueChange={(v) => setCountry(String(v || "DE").toUpperCase())}
-              options={[
-                { value: "DE", label: "Deutschland (DE)" },
-                { value: "AT", label: "Österreich (AT)" },
-                { value: "CH", label: "Schweiz (CH)" },
-              ]}
-            />
+            <Select value={country} onChange={(e) => setCountry(String(e.target.value || "DE").toUpperCase())}>
+              <option value="DE">Deutschland (DE)</option>
+              <option value="AT">Österreich (AT)</option>
+              <option value="CH">Schweiz (CH)</option>
+            </Select>
           </CardContent>
         </Card>
 
